@@ -438,7 +438,7 @@ node --test
 | Repository | [github.com/YQteam-hq/apicovenant](https://github.com/YQteam-hq/apicovenant) |
 | Issues | [github.com/YQteam-hq/apicovenant/issues](https://github.com/YQteam-hq/apicovenant/issues) |
 | Security | see [SECURITY.md](SECURITY.md) |
-| Email | [yqteam@h5.quest](mailto:yqteam@h5.quest) |
+| Email | [yqteam@yeah.net](mailto:yqteam@yeah.net) |
 
 ### Brand
 

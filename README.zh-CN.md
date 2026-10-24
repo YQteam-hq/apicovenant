@@ -419,7 +419,7 @@ node --test
 | 仓库 | [github.com/YQteam-hq/apicovenant](https://github.com/YQteam-hq/apicovenant) |
 | 问题反馈 | [github.com/YQteam-hq/apicovenant/issues](https://github.com/YQteam-hq/apicovenant/issues) |
 | 安全问题 | 见 [SECURITY.md](SECURITY.md) |
-| 邮箱 | [yqteam@h5.quest](mailto:yqteam@h5.quest) |
+| 邮箱 | [yqteam@yeah.net](mailto:yqteam@yeah.net) |
 
 ### 品牌
 

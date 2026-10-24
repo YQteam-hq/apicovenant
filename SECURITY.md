@@ -14,7 +14,7 @@ release. Security fixes land on the latest release line only.
 
 **Do not open a public issue for a security problem.**
 
-Write to [yqteam@h5.quest](mailto:yqteam@h5.quest) with:
+Write to [yqteam@yeah.net](mailto:yqteam@yeah.net) with:
 
 - what the problem is, and how to reproduce it
 - the affected version, the Node.js version and the platform
