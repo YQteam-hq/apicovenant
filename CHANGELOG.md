@@ -11,6 +11,40 @@ says so.
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-10-24
+
+Seven correctness fixes across replay, mock generation, specification loading,
+recording and YAML parsing. No public API, CLI flag or file format changes.
+
+Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
+
+### Fixed
+
+- **`diff --replay-all` no longer fails on requests with a body.** The replayer
+  forwarded recorded transport headers such as `content-length` to `fetch()`,
+  which rejects them for a request that also carries a body. Those headers are
+  now stripped before replaying, matching what the recorder already did.
+- **The mock generator honours the constraints it is given.** Arrays respect
+  `minItems`/`maxItems` and `uniqueItems`, integers and numbers are clamped to
+  `minimum`/`maximum` and the exclusive bounds, and common regular expressions
+  are reverse-filled instead of falling through to a placeholder string.
+- **Dangling local `$ref` values are rejected when a specification loads.** A
+  reference to a missing component used to make `lint` report no problems and
+  make `mock` serve placeholder data; it is now an error at load time.
+  External references are still out of scope.
+- **The recorder redacts credentials carried in the query string.** Only
+  headers were redacted before, so `?api_key=…` and similar values were written
+  to the golden file verbatim.
+- **Arrays that only changed order are reported once.** A reordered array used
+  to produce a cascade of positional differences; it is now a single
+  `[reordered]` difference. Array items are compared key-order-insensitively.
+- **YAML merge keys, multi-line flow collections and document markers are
+  handled.** `<<: *anchor` is expanded, flow collections may span several
+  lines, and a document that contains more than one YAML document is rejected
+  instead of being silently merged.
+- **`diff` rejects `--spec` together with `--target`.** Passing both is now a
+  usage error rather than one of the two silently winning.
+
 ## [1.0.1] — 2026-10-24
 
 The published package could not run. `apicovenant@1.0.0` installed without
