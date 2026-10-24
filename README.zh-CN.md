@@ -415,7 +415,7 @@ node --test
 
 | | |
 | --- | --- |
-| 官网 | [yq-tuandui.xyz](https://yq-tuandui.xyz) |
+| 维护方 | [YQteam](https://yq-tuandui.xyz) |
 | 仓库 | [github.com/YQteam-hq/apicovenant](https://github.com/YQteam-hq/apicovenant) |
 | 问题反馈 | [github.com/YQteam-hq/apicovenant/issues](https://github.com/YQteam-hq/apicovenant/issues) |
 | 安全问题 | 见 [SECURITY.md](SECURITY.md) |

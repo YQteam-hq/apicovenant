@@ -434,7 +434,7 @@ node --test
 
 | | |
 | --- | --- |
-| Website | [yq-tuandui.xyz](https://yq-tuandui.xyz) |
+| Maintainer | [YQteam](https://yq-tuandui.xyz) |
 | Repository | [github.com/YQteam-hq/apicovenant](https://github.com/YQteam-hq/apicovenant) |
 | Issues | [github.com/YQteam-hq/apicovenant/issues](https://github.com/YQteam-hq/apicovenant/issues) |
 | Security | see [SECURITY.md](SECURITY.md) |
