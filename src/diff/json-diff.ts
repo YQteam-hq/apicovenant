@@ -44,6 +44,7 @@ export function diffJson(before: unknown, after: unknown, basePath = ''): BodyDi
 
   if (Array.isArray(before) && Array.isArray(after)) {
     const shared = Math.min(before.length, after.length);
+    const differences: BodyDifference[] = [];
     for (let index = 0; index < shared; index += 1) {
       differences.push(...diffJson(before[index], after[index], `${basePath}${pointer(index)}`));
     }
@@ -60,6 +61,24 @@ export function diffJson(before: unknown, after: unknown, basePath = ''): BodyDi
         after: preview(after.slice(before.length)),
       });
     }
+
+    // Arrays that only changed order (same multiset of items, same length) are
+    // reported as one reorder instead of a cascade of positional diffs.
+    if (before.length === after.length && differences.length > 0) {
+      const beforeItems = before.map(normalizeForCompare).sort();
+      const afterItems = after.map(normalizeForCompare).sort();
+      const sameItems = beforeItems.every((item, index) => item === afterItems[index]);
+      if (sameItems) {
+        differences.length = 0;
+        differences.push({
+          path: basePath || '/',
+          kind: 'changed',
+          before: '[reordered]',
+          after: '[reordered]',
+        });
+      }
+    }
+
     return differences;
   }
 
@@ -82,4 +101,15 @@ export function parseBody(body: string, bodyType: string): unknown {
   } catch {
     return body;
   }
+}
+
+// Key-order-insensitive serialisation so two structurally equal objects hash
+// identically when comparing array items as a multiset.
+function normalizeForCompare(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(normalizeForCompare).join(',')}]`;
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${normalizeForCompare(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }

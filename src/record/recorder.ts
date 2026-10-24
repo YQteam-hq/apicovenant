@@ -34,6 +34,18 @@ export interface RecorderHandle {
 
 const DEFAULT_REDACT = ['authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization'];
 
+// Query parameter names that usually carry credentials. Unlike headers, query
+// keys have no canonical casing, so we match on the word itself.
+const SENSITIVE_QUERY_KEY = /(api[-_]?key|apikey|access[-_]?token|token|secret|password|passwd|credential|authorization)/i;
+
+const redactQuery = (query: Record<string, string>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(query)) {
+    out[name] = SENSITIVE_QUERY_KEY.test(name) ? '<redacted>' : value;
+  }
+  return out;
+};
+
 export async function startRecorder(options: RecorderOptions): Promise<RecorderHandle> {
   const target = options.target.replace(/\/+$/, '');
   const host = options.host ?? '127.0.0.1';
@@ -118,7 +130,7 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       const interaction: GoldenInteraction = {
         method: (request.method ?? 'GET').toUpperCase(),
         path: requestUrl.pathname,
-        query: Object.fromEntries(requestUrl.searchParams.entries()),
+        query: redactQuery(Object.fromEntries(requestUrl.searchParams.entries())),
         requestHeaders: redactHeaders(request.headers),
         status: upstream.status,
         responseHeaders: redactHeaders(responseHeaders),

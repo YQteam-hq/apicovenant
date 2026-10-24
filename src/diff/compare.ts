@@ -83,7 +83,7 @@ async function performFetch(
   try {
     const response = await fetch(url, {
       method: interaction.method,
-      headers: interaction.requestHeaders,
+      headers: forwardHeaders(interaction.requestHeaders),
       body: interaction.method === 'GET' || interaction.method === 'HEAD' ? undefined : interaction.body,
       signal: controller.signal,
       redirect: 'manual',
@@ -159,6 +159,31 @@ export interface DiffOptions {
 const DEFAULT_COMPARE_HEADERS = ['content-type', 'location', 'etag', 'cache-control'];
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// Headers that fetch() must manage itself: a user-supplied content-length
+// (or transfer-encoding, host, connection) alongside a body makes undici
+// throw "invalid content-length header" (UND_ERR_INVALID_ARG).
+const STRIP_FORWARD = new Set([
+  'host',
+  'connection',
+  'keep-alive',
+  'content-length',
+  'transfer-encoding',
+  'proxy-connection',
+  'te',
+  'trailer',
+  'upgrade',
+]);
+
+function forwardHeaders(headers: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    if (STRIP_FORWARD.has(name.toLowerCase())) continue;
+    out[name] = value;
+  }
+  return out;
+}
 
 function matchOperation(spec: ApiSpec, method: string, pathname: string): Operation | undefined {
   const upper = method.toUpperCase();

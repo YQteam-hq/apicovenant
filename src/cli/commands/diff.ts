@@ -37,6 +37,9 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
   if (!options.target && !options.spec) {
     throw new UsageError('either --target or --spec is required');
   }
+  if (options.target && options.spec) {
+    throw new UsageError('--spec and --target are mutually exclusive; pass exactly one of them');
+  }
 
   const golden = parseGoldenFile(await readTextFile(options.golden));
 

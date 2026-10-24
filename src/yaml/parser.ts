@@ -1,3 +1,5 @@
+import { isPlainObject } from '../util/text.ts';
+
 export class YamlError extends Error {
   readonly line: number;
   readonly column: number;
@@ -60,6 +62,21 @@ class YamlParser {
     if (!this.lines[this.index]) return null;
 
     const value = this.parseNode();
+
+    // Only one document is supported: after the first document ends we allow a
+    // trailing document-end marker ("..." / "---"), but any further content is
+    // a second document and is rejected rather than silently merged.
+    this.skipIgnorable();
+    let rest = this.lines[this.index];
+    if (rest && (rest.text === '---' || rest.text === '...')) {
+      this.index += 1;
+      this.skipIgnorable();
+      rest = this.lines[this.index];
+    }
+    if (rest) {
+      throw new YamlError('multiple YAML documents are not supported', rest.num);
+    }
+
     return value === undefined ? null : value;
   }
 
@@ -68,10 +85,6 @@ class YamlParser {
       const line = this.lines[this.index];
       if (!line) break;
       if (line.blank) {
-        this.index += 1;
-        continue;
-      }
-      if (line.text === '---' || line.text === '...') {
         this.index += 1;
         continue;
       }
@@ -121,6 +134,7 @@ class YamlParser {
       map[key] = this.parseValueAfterKey(rest, indent, line);
     }
 
+    applyMergeKeys(map);
     return map;
   }
 
@@ -218,7 +232,7 @@ class YamlParser {
     }
 
     if (value.startsWith('[') || value.startsWith('{')) {
-      return parseFlow(value, line.num);
+      return this.parseFlowMultiLine(value, indent, line);
     }
 
     if (value.startsWith('"') || value.startsWith("'")) {
@@ -295,10 +309,76 @@ class YamlParser {
     if (chomp === 'keep') return `${body}\n`;
     return body === '' ? '' : `${body}\n`;
   }
+
+  // Flow collections may span several lines (comments are stripped per line
+  // beforehand). When the first line is unterminated, keep appending the
+  // following lines until the brackets balance again.
+  private parseFlowMultiLine(first: string, parentIndent: number, line: SourceLine): unknown {
+    let text = first;
+    while (!isFlowClosed(text) && this.index < this.lines.length) {
+      const next = this.lines[this.index];
+      if (!next) break;
+      if (next.blank) {
+        text += ' ';
+        this.index += 1;
+        continue;
+      }
+      if (next.text === '---' || next.text === '...') break;
+      if (next.indent < parentIndent) break;
+      text += next.text;
+      this.index += 1;
+    }
+    return parseFlow(text, line.num);
+  }
 }
 
 function isSequenceEntry(text: string): boolean {
   return text === '-' || text.startsWith('- ');
+}
+
+// YAML merge key: "<<: *anchor" (or a flow mapping / sequence of anchors)
+// inlines the referenced mapping; explicit keys on the mapping win.
+function applyMergeKeys(map: Record<string, unknown>): void {
+  const merge = map['<<'];
+  if (merge === undefined) return;
+  delete map['<<'];
+
+  const sources = Array.isArray(merge) ? merge : [merge];
+  for (const source of sources) {
+    if (!isPlainObject(source)) continue;
+    for (const [key, value] of Object.entries(source)) {
+      if (!(key in map)) map[key] = value;
+    }
+  }
+}
+
+function isFlowClosed(text: string): boolean {
+  let depth = 0;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] as string;
+    if (quote) {
+      if (ch === '\\' && quote === '"') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        if (quote === "'" && text[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '[' || ch === '{') depth += 1;
+    if (ch === ']' || ch === '}') depth -= 1;
+  }
+  return depth <= 0;
 }
 
 export function findKeySeparator(text: string): number {

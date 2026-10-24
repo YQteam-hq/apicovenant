@@ -4,6 +4,7 @@ import { parseYaml, YamlError } from '../yaml/parser.ts';
 import { isPlainObject } from '../util/text.ts';
 import { readTextFile } from '../util/fs.ts';
 import { buildSpec, type ApiSpec } from './model.ts';
+import { collectRefs, resolveLocalRef } from './ref.ts';
 
 export class SpecError extends Error {
   readonly file: string;
@@ -82,9 +83,22 @@ export function validateDocument(doc: unknown, file = ''): void {
   }
 }
 
+// Every local $ref must point at something that exists; a dangling reference
+// would otherwise make lint pass silently and mock return placeholder data.
+function validateRefs(doc: unknown, file = ''): void {
+  const refs = collectRefs(doc);
+  for (const ref of refs) {
+    if (!ref.startsWith('#/')) continue; // external references are out of scope
+    if (resolveLocalRef(doc, ref) === undefined) {
+      throw new SpecError(`unresolved $ref "${ref}"`, file);
+    }
+  }
+}
+
 export function loadSpecFromText(text: string, options: LoadOptions = {}): ApiSpec {
   const doc = parseDocument(text, options);
   validateDocument(doc, options.document ?? '');
+  validateRefs(doc, options.document ?? '');
   return buildSpec(doc, options.document ?? '<memory>');
 }
 

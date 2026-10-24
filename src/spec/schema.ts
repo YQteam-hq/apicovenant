@@ -394,12 +394,27 @@ export function generateExample(schema: unknown, options: GenerateOptions = {}):
       case 'array': {
         const itemSchema = s.items;
         if (!itemSchema) return [];
-        return [build(itemSchema, key, depth + 1)];
+        const min = typeof s.minItems === 'number' ? Math.max(0, s.minItems) : 1;
+        const max = typeof s.maxItems === 'number' ? Math.max(min, s.maxItems) : min;
+        const count = Math.min(max, min);
+        const items: unknown[] = [];
+        const seen = new Set<string>();
+        for (let index = 0; index < count; index += 1) {
+          let item = build(itemSchema, `${key}[${index}]`, depth + 1);
+          if (s.uniqueItems === true) {
+            for (let attempt = 0; attempt < 10 && seen.has(JSON.stringify(item)); attempt += 1) {
+              item = build(itemSchema, `${key}[${index}]v${attempt}`, depth + 1);
+            }
+            seen.add(JSON.stringify(item));
+          }
+          items.push(item);
+        }
+        return items;
       }
       case 'integer':
-        return stableInt(key);
+        return boundedNumber(key, true, s);
       case 'number':
-        return stableNumber(key);
+        return boundedNumber(key, false, s);
       case 'boolean':
         return true;
       case 'null':
@@ -420,6 +435,35 @@ function stableInt(key: string): number {
 function stableNumber(key: string): number {
   const hash = hashString(key || 'value');
   return Math.round(((hash % 9000) + 100) / 100) / 10;
+}
+
+// A deterministic number that satisfies the numeric bounds of the schema,
+// clamping the stable seed and rounding to integer when the type demands it.
+function boundedNumber(key: string, integer: boolean, schema: JsonSchema): number {
+  let value = integer ? stableInt(key) : stableNumber(key);
+
+  if (typeof schema.minimum === 'number') value = Math.max(value, schema.minimum);
+  if (typeof schema.maximum === 'number') value = Math.min(value, schema.maximum);
+  if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) {
+    value = schema.exclusiveMinimum + (integer ? 1 : 0.01);
+  }
+  if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) {
+    value = schema.exclusiveMaximum - (integer ? 1 : 0.01);
+  }
+
+  if (integer) {
+    value = Math.round(value);
+    if (typeof schema.maximum === 'number' && value > schema.maximum) value = Math.floor(schema.maximum);
+    if (typeof schema.minimum === 'number' && value < schema.minimum) value = Math.ceil(schema.minimum);
+    if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) {
+      value = Math.ceil(schema.exclusiveMaximum) - 1;
+    }
+    if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) {
+      value = Math.floor(schema.exclusiveMinimum) + 1;
+    }
+  }
+
+  return value;
 }
 
 function stableString(schema: JsonSchema, key: string): string {
@@ -505,6 +549,125 @@ function hasTotal(key: string): boolean {
 }
 
 
+const PATTERN_ESCAPES: Record<string, string> = {
+  d: '0',
+  w: 'a',
+  s: ' ',
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  D: 'x',
+  W: 'x',
+  S: 'x',
+};
+
+interface PatternFill {
+  value: string;
+  end: number;
+}
+
+// Reverse-fills a common subset of regular expressions (character classes,
+// escapes, quantifiers, grouping) so a generated string satisfies the pattern
+// instead of silently violating it. Returns undefined for constructs it cannot
+// fill, so callers can fall back to their existing candidates.
+function fillPattern(pattern: string): string | undefined {
+  let body = pattern.replace(/^\^/, '').replace(/\$$/, '');
+  const alt = body.indexOf('|');
+  if (alt !== -1) body = body.slice(0, alt); // fill the first alternative
+
+  const parse = (text: string, start: number): PatternFill | undefined => {
+    let out = '';
+    let lastToken = '';
+    let i = start;
+
+    while (i < text.length) {
+      const ch = text[i] as string;
+      if (ch === '|' || ch === ')') return { value: out, end: i + 1 };
+
+      if (ch === '(') {
+        let j = i + 1;
+        if (text[j] === '?') j += 1; // skip (?: (?= (?! (?<= look-around prefixes
+        const inner = parse(text, j);
+        if (!inner) return undefined;
+        out += inner.value;
+        lastToken = inner.value;
+        i = inner.end;
+        continue;
+      }
+
+      if (ch === '\\') {
+        const esc = text[i + 1];
+        if (esc === undefined) return undefined;
+        const mapped = PATTERN_ESCAPES[esc];
+        if (mapped === undefined) return undefined; // \b, \B, \1 ... unsupported
+        out += mapped;
+        lastToken = mapped;
+        i += 2;
+        continue;
+      }
+
+      if (ch === '[') {
+        const close = text.indexOf(']', i);
+        if (close === -1) return undefined;
+        const cls = text.slice(i + 1, close);
+        let char: string | undefined;
+        if (cls.startsWith('^')) {
+          char = 'x';
+        } else if (cls.startsWith('\\')) {
+          char = PATTERN_ESCAPES[cls[1] ?? ''] ?? undefined;
+        } else if (cls.startsWith('-')) {
+          char = cls[1];
+        } else {
+          char = cls[0];
+        }
+        if (char === undefined) char = 'x';
+        out += char;
+        lastToken = char;
+        i = close + 1;
+        continue;
+      }
+
+      if (ch === '+') {
+        i += 1; // already emitted one occurrence
+        continue;
+      }
+      if (ch === '*') {
+        i += 1; // zero or more: keep the single emitted occurrence
+        continue;
+      }
+      if (ch === '?') {
+        i += 1; // already emitted the optional occurrence
+        continue;
+      }
+      if (ch === '{') {
+        const close = text.indexOf('}', i);
+        if (close === -1) return undefined;
+        const spec = text.slice(i + 1, close);
+        const m = /^(\d+)(?:,(\d*))?$/.exec(spec);
+        if (!m) return undefined;
+        const times = Number(m[1]);
+        if (lastToken === '') return undefined;
+        out = out.slice(0, out.length - lastToken.length) + lastToken.repeat(times);
+        i = close + 1;
+        continue;
+      }
+
+      if (ch === '^' || ch === '$') {
+        i += 1;
+        continue;
+      }
+
+      out += ch;
+      lastToken = ch;
+      i += 1;
+    }
+
+    return { value: out, end: i };
+  };
+
+  return parse(body, 0)?.value;
+}
+
 function constrainString(value: string, schema: JsonSchema, key: string): string {
   let result = value;
 
@@ -512,7 +675,10 @@ function constrainString(value: string, schema: JsonSchema, key: string): string
     try {
       const pattern = new RegExp(schema.pattern);
       const literal = schema.pattern.replace(/^\^/, '').replace(/\$$/, '');
-      const candidates = [result, literal, `sample-${key}`, key, `${literal}-1`];
+      const candidates: string[] = [];
+      const filled = fillPattern(schema.pattern);
+      if (filled !== undefined) candidates.push(filled);
+      candidates.push(result, literal, `sample-${key}`, key, `${literal}-1`);
       for (const candidate of candidates) {
         if (candidate.length > 0 && pattern.test(candidate)) {
           result = candidate;
