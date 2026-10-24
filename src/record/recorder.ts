@@ -43,6 +43,32 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
   const file = createGoldenFile(target, options.spec);
   let captured = 0;
 
+  // Headers that fetch() must manage itself: a user-supplied content-length
+  // (or transfer-encoding, host, connection) alongside a body makes undici
+  // throw "invalid content-length header" (UND_ERR_INVALID_ARG).
+  const STRIP_FORWARD = new Set([
+    'host',
+    'connection',
+    'keep-alive',
+    'content-length',
+    'transfer-encoding',
+    'proxy-connection',
+    'te',
+    'trailer',
+    'upgrade',
+  ]);
+
+  const forwardHeaders = (headers: Record<string, string | string[] | undefined>): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [name, value] of Object.entries(headers)) {
+      if (value === undefined) continue;
+      const lower = name.toLowerCase();
+      if (STRIP_FORWARD.has(lower)) continue;
+      out[name] = Array.isArray(value) ? value.join(', ') : String(value);
+    }
+    return out;
+  };
+
   const redactHeaders = (headers: Record<string, string | string[] | undefined>): Record<string, string> => {
     const out: Record<string, string> = {};
     for (const [name, value] of Object.entries(headers)) {
@@ -67,7 +93,7 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       try {
         upstream = await fetch(targetUrl, {
           method: request.method ?? 'GET',
-          headers: request.headers as Record<string, string>,
+          headers: forwardHeaders(request.headers),
           body: ['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase()) ? undefined : requestBody,
           redirect: 'manual',
         });
