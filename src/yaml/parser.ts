@@ -599,6 +599,19 @@ function parseFlow(text: string, lineNum: number, anchors: Map<string, unknown>)
       if (!anchors.has(name)) throw new YamlError(`Unknown alias "*${name}"`, lineNum);
       return anchors.get(name);
     }
+    if (ch === '&') {
+      // Anchor definition inside a flow collection:
+      // "{a: &x 1, b: *x}" / "[&x 1, *x]". Without this branch the "&x"
+      // is swallowed into a plain scalar and the later "*x" lookup fails.
+      pos += 1;
+      const start = pos;
+      while (pos < text.length && !/[\s,\]}]/.test(text[pos] as string)) pos += 1;
+      const name = text.slice(start, pos);
+      if (!name) throw new YamlError('Invalid anchor', lineNum);
+      const anchored = parseValue();
+      anchors.set(name, anchored);
+      return anchored;
+    }
     if (ch === '[') return parseSeq();
     if (ch === '{') return parseMap();
     if (ch === '"' || ch === "'") {
@@ -678,5 +691,10 @@ function parseFlow(text: string, lineNum: number, anchors: Map<string, unknown>)
 
   const result = parseValue();
   skipWs();
+  // Anything left over ("[1] extra", "[1]]", "{a: 1} junk") used to be
+  // silently dropped, which turns malformed documents into wrong values.
+  if (pos < text.length) {
+    throw new YamlError(`Unexpected content after flow collection: "${text.slice(pos)}"`, lineNum);
+  }
   return result;
 }

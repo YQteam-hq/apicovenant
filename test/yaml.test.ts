@@ -167,3 +167,21 @@ test('a less-indented line ends the block scalar instead of being swallowed', ()
     (error: unknown) => error instanceof YamlError && error.line === 3,
   );
 });
+
+test('flow collections resolve anchor definitions', () => {
+  // BUG-25: "&x" inside "[...]" / "{...}" was swallowed into a plain
+  // scalar, so the matching "*x" alias failed to resolve.
+  assert.deepEqual(parseYaml('a: {x: &v 1, y: *v}'), { a: { x: 1, y: 1 } });
+  assert.deepEqual(parseYaml('a: [&v 1, *v]'), { a: [1, 1] });
+  assert.deepEqual(parseYaml('a: {x: &v hello, y: [*v, *v]}'), { a: { x: 'hello', y: ['hello', 'hello'] } });
+});
+
+test('content after a closed flow collection is an error', () => {
+  // BUG-26: trailing garbage ("[1] extra", "[1]]", "{a: 1} junk") used to
+  // be silently dropped, turning malformed documents into wrong values.
+  assert.throws(() => parseYaml('a: [1] extra'), /Unexpected content after flow collection/);
+  assert.throws(() => parseYaml('a: [1]]'), /Unexpected content after flow collection/);
+  assert.throws(() => parseYaml('a: {b: 1} junk'), /Unexpected content after flow collection/);
+  // Well-formed flow collections are unaffected.
+  assert.deepEqual(parseYaml('a: [1, 2]\nb: {c: 3}'), { a: [1, 2], b: { c: 3 } });
+});

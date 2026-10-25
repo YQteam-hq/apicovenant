@@ -20,7 +20,10 @@ export const securityRequirementDefined: RuleDefinition = {
       if (operation.security.length > 0) continue;
 
       const explicitlyPublic = operation.raw['x-public'] === true;
-      const looksPublic = PUBLIC_PATH_HINTS.some((hint) => operation.path.toLowerCase().includes(hint));
+      // Match whole path segments: a substring test would exempt
+      // "/users/login-history" because it contains "/login".
+      const segments = operation.path.toLowerCase().split('/').filter(Boolean);
+      const looksPublic = PUBLIC_PATH_HINTS.some((hint) => segments.includes(hint.slice(1)));
 
       if (explicitlyPublic || looksPublic) continue;
 
