@@ -11,6 +11,101 @@ says so.
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-10-25
+
+Twenty-six correctness fixes from two audit rounds: 22 defects confirmed in a
+two-round audit (2 high, 6 medium, 14 low) plus 4 more from a third round. No
+public API or file format changes. One new lint rule is added (see below).
+
+Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
+
+### Fixed
+
+- **Recorded responses are forwarded without stale framing headers.** The
+  recorder passed `content-encoding` / `content-length` / `transfer-encoding`
+  through verbatim even though `fetch()` had already decompressed the body, so
+  clients received truncated or empty responses. Those headers are now stripped
+  and Node re-frames the response.
+- **External `$ref` values no longer crash the mock.** A legitimate external
+  reference (http/https/file) used to throw inside local resolution, crashing
+  the mock server and surfacing internal errors from lint and diff. External
+  references now degrade to `undefined` per level; malformed local pointers
+  (`#foo`) still fail loudly.
+- **One malformed schema can no longer exempt every later response and
+  operation from the pagination rule.** A stray `return` in the rule walked the
+  schema list once instead of continuing to the next entry.
+- **An illegal `lint_openapi` severity no longer suppresses every finding.**
+  The MCP tool now validates the `severity` argument up front (returns an
+  `errorResult`), with defence in depth in the lint engine.
+- **`component-unused` no longer misreports components referenced through
+  longer-named schemas.** Reference ownership used plain string prefix
+  matching; it is now segment-aware (`ownPath + '/'`).
+- **The 405 `Allow` header lists the methods the route really supports.**
+  It was hardcoded to `GET`; it now aggregates and sorts the supported methods.
+- **`?x-mock-status=` falls back to the `default` response.** When no exact
+  status matched, the default response's error schema is used and the status
+  code reflects the requested one.
+- **`response-schema-required` no longer demands a body for 1xx/3xx
+  responses.**
+- **Golden files tolerate a UTF-8 BOM and report indexed errors.** A `null`
+  entry used to raise a TypeError without an index; errors now name the exact
+  entry (`interactions[i]` / `findings[i] must be an object`).
+- **Keep-chomping block scalars (`|+` / `>+`) no longer drop trailing empty
+  lines.**
+- **`--fail-on` accepts only documented values.** Any other value is a usage
+  error instead of being silently accepted.
+- **Diff report keys include the query string.** Interactions differing only
+  by query no longer collide in the report.
+- **`path-collection-plural` no longer misreports filter views.**
+  `/users/active` and friends are exempt via a view-word list.
+- **Parameters without a `name` are kept instead of dropped.** A nameless
+  parameter previously bypassed every parameter rule; it now surfaces under the
+  new **`parameter-name-required`** rule (error, parameters category). Rule
+  count is 42 → 43.
+- **Anchor aliases inside flow collections are resolved.** Merge-key lists and
+  other flow values can now reference earlier anchors.
+- **Block scalars in sequences (`- |`) and compact nested sequences (`- - x`)
+  no longer throw "Unexpected indentation".**
+- **Pattern-filled values respect escaped punctuation.** `fillPattern` now
+  understands escaped punctuation in common legal patterns.
+- **`pattern × minLength` no longer produces pattern-breaking values.**
+  The pattern is re-validated after length constraints and re-filled until it
+  holds.
+- **Path templates with a literal suffix (`/files/{name}.json`) work in mock
+  and diff.** Parameter segments become capture groups and literals are
+  escaped.
+- **`x-mock.status` takes precedence over `?x-mock-status=`.**
+- **Commands reject options that belong to other commands.** A single global
+  option table previously let every command silently accept every other
+  command's options; each command now has its own option set and out-of-set
+  options are a usage error (exit 2).
+- **Dead code removed from `deref` and `generateExample`.** The unused
+  `shallow` and `skipProperties` options are gone.
+- **`server-https` no longer exempts look-alike local hostnames.** `http://
+  localhost.example.com` or `http://api.127.0.0.1.attacker.net` are matched by
+  parsing the hostname exactly (`localhost`, `127.0.0.1`, `0.0.0.0`, `::1`,
+  `*.local`); an unparseable URL is not treated as local.
+- **`security-requirement-defined` matches whole path segments.** A public
+  hint like `/login` no longer exempts `/users/login-history`.
+- **Anchors defined inside flow collections register correctly.** The legal
+  document `a: {x: &v 1, y: *v}` no longer throws `Unknown alias "*v"`.
+- **Content after a closed flow collection is rejected.** `a: [1] extra`,
+  `a: [1]]` and `a: {b: 1} junk` now throw `Unexpected content after flow
+  collection` instead of silently parsing wrong values.
+
+### Changed
+
+- `server-https` matches local-host exemptions by exact hostname; genuinely
+  local hosts (`http://localhost:3000`, `http://api.local`) stay exempt.
+- `component-unused` reference ownership is segment-aware.
+- The 405 `Allow` header content changes from a constant `GET` to the
+  supported methods.
+
+### Notes
+
+- 201 tests (199 pass, 0 fail, 2 pre-existing skips); `release-check` reports
+  `rules: 43 in code, 43 documented`.
+
 ## [1.0.2] — 2026-10-24
 
 Seven correctness fixes across replay, mock generation, specification loading,
