@@ -52,7 +52,9 @@ jobs:
         with:
           node-version: '24'
       - name: The reference contract has no findings
-        run: node bin/apicovenant.mjs lint examples/shop.openapi.yaml --fail-on info
+        run: |
+          node bin/apicovenant.mjs lint examples/shop.openapi.yaml --format json \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const r=JSON.parse(d);if(r.summary.total>0){console.error('the reference contract has '+r.summary.total+' findings');process.exit(1)}})"
       - name: The flawed contract is detected
         run: |
           if node bin/apicovenant.mjs lint examples/legacy.openapi.yaml; then
