@@ -39,10 +39,13 @@ function walkSchema(
   if (!isPlainObject(schema)) return;
 
   if (isRefNode(schema)) {
+    // Do not walk into the referenced schema. It is a component of its own
+    // and is visited under its own name when componentSchemas() iterates,
+    // which keeps every reported pointer reachable in the document. Walking
+    // into it would reuse the pointer of the *reference site* and produce
+    // paths like "/oneOf/0/required" that resolve to nothing.
     if (seen.has(schema.$ref)) return;
     seen.add(schema.$ref);
-    const resolved = resolveSchemaRef(doc, schema.$ref);
-    if (resolved) walkSchema(doc, resolved, visit, pointer, seen);
     return;
   }
 
@@ -280,6 +283,30 @@ export const schemaArrayItemsRequired: RuleDefinition = {
   },
 };
 
+// The properties a schema defines, including the ones contributed by its
+// composition keywords. OpenAPI 3.1 documents routinely split them:
+// "required" sits on the parent while "properties" lives in an allOf branch.
+function definedProperties(doc: Record<string, unknown>, node: unknown, depth = 0): Set<string> {
+  const names = new Set<string>();
+  if (!isPlainObject(node)) return names;
+
+  const properties = node['properties'];
+  if (isPlainObject(properties)) {
+    for (const name of Object.keys(properties)) names.add(name);
+  }
+
+  if (depth >= 4) return names;
+  for (const keyword of ['allOf', 'anyOf', 'oneOf'] as const) {
+    const list = node[keyword];
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const target = isRefNode(entry) ? resolveSchemaRef(doc, entry.$ref) : entry;
+      for (const name of definedProperties(doc, target, depth + 1)) names.add(name);
+    }
+  }
+  return names;
+}
+
 export const schemaRequiredPropertyDefined: RuleDefinition = {
   id: 'schema-required-property-defined',
   title: 'Required properties exist',
@@ -293,17 +320,37 @@ export const schemaRequiredPropertyDefined: RuleDefinition = {
     const schemas = componentSchemas(spec);
     for (const [schemaName, schema] of Object.entries(schemas)) {
       walkSchema(spec.raw, schema, (node, pointer) => {
-        const required = node['required'];
-        if (!Array.isArray(required)) return;
-        const properties = isPlainObject(node['properties']) ? node['properties'] : {};
-        for (const name of required) {
-          if (typeof name !== 'string') continue;
-          if (name in properties) continue;
-          report({
-            message: `Schema "${schemaName}" requires "${name}" but does not define it`,
-            path: `/components/schemas/${schemaName}${pointer}/required`,
-            hint: `Add "${name}" to "properties" or remove it from "required".`,
-          });
+        const reported = new Set<string>();
+        const check = (required: unknown, where: string, available: Set<string>): void => {
+          if (!Array.isArray(required)) return;
+          for (const name of required) {
+            if (typeof name !== 'string') continue;
+            if (available.has(name)) continue;
+            const seen = `${where}:${name}`;
+            if (reported.has(seen)) continue;
+            reported.add(seen);
+            report({
+              message: `Schema "${schemaName}" requires "${name}" but does not define it`,
+              path: `/components/schemas/${schemaName}${where}/required`,
+              hint: `Add "${name}" to "properties" or remove it from "required".`,
+            });
+          }
+        };
+
+        const own = definedProperties(spec.raw, node);
+        // A node that is itself an allOf branch is judged by its parent,
+        // which pools the properties of every branch. Checking it here
+        // would miss the properties a sibling branch contributes.
+        if (!/\/allOf\/\d+$/.test(pointer)) check(node['required'], pointer, own);
+
+        // Branches of an allOf describe one object: "required" may sit in
+        // one branch while "properties" sits in a sibling one.
+        const branches = Array.isArray(node['allOf']) ? node['allOf'] : [];
+        for (const [index, branch] of branches.entries()) {
+          const target = isRefNode(branch) ? resolveSchemaRef(spec.raw, branch.$ref) : branch;
+          if (!isPlainObject(target)) continue;
+          const pooled = new Set([...own, ...definedProperties(spec.raw, target)]);
+          check(target['required'], `${pointer}/allOf/${index}`, pooled);
         }
       });
     }

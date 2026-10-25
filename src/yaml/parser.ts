@@ -184,7 +184,10 @@ class YamlParser {
       }
 
       this.index += 1;
-      items.push(this.parseInlineValue(content, contentIndent, line));
+      // The continuation of a multi-line scalar inside a sequence item is
+      // judged against the dash, not against the column where the content
+      // starts: "- first\n  second" has both lines at the same column.
+      items.push(this.parseInlineValue(content, indent, line));
     }
 
     return items;
@@ -252,8 +255,54 @@ class YamlParser {
     }
 
     if (value.startsWith('"') || value.startsWith("'")) {
-      const quoted = parseQuoted(value, line.num);
-      return quoted.value;
+      // A quoted scalar may span several lines: the continuation lines are
+      // folded into the string with a single space, exactly like a plain
+      // multi-line scalar. Real world documents (the OpenAI spec has a
+      // 4 MB one) use this for long command lines and JSON fragments.
+      let text = value;
+      const quote = value[0];
+      let foldedAfterBlank = false;
+      while (quotedStillOpen(text)) {
+        const next = this.lines[this.index];
+        if (!next) break;
+        if (next.blank) {
+          // An empty line inside a multi-line quoted scalar is a literal
+          // newline, not the end of the scalar (the GitHub spec wraps
+          // descriptions this way).
+          text += '\n';
+          foldedAfterBlank = true;
+          this.index += 1;
+          continue;
+        }
+        if (next.indent <= indent) break;
+        if (next.text === '---' || next.text === '...') break;
+        // No "isSequenceEntry" test: a continuation line that is more
+        // indented than the value cannot start a sequence item (those align
+        // with their dash), and real documents continue a description with
+        // a line that starts with "- ".
+        // Deliberately no "findKeySeparator" check either: inside quotes a
+        // colon carries no structure, and continuation lines routinely
+        // contain one ("Supported anchors: `created_at`. Note that ...").
+        // Sibling keys are already excluded by the indent check above.
+        const nextText = next.text.trim();
+        // Inside a double-quoted scalar a trailing backslash is a line
+        // continuation: the newline and the leading indentation of the next
+        // line are dropped entirely, not folded into a space
+        // (the OpenAI spec writes long $ref strings this way).
+        if (quote === '"' && endsWithLineContinuation(text)) {
+          text = `${text.slice(0, -1)}${nextText}`;
+        } else if (foldedAfterBlank) {
+          // The blank line already contributed the separating newline;
+          // the leading indentation of this line is stripped instead of
+          // being folded into a space.
+          text += nextText;
+        } else {
+          text += ` ${nextText}`;
+        }
+        foldedAfterBlank = false;
+        this.index += 1;
+      }
+      return parseQuoted(text, line.num).value;
     }
 
     const parts = [value];
@@ -262,7 +311,6 @@ class YamlParser {
       if (!next || next.blank) break;
       if (next.indent <= indent) break;
       if (next.text === '---' || next.text === '...') break;
-      if (isSequenceEntry(next.text)) break;
       if (findKeySeparator(next.text) !== -1) break;
       parts.push(next.text.trim());
       this.index += 1;
@@ -275,6 +323,13 @@ class YamlParser {
     const style = header[0] as '|' | '>';
     const modifiers = header.slice(1).trim();
     const chomp = /[-+]/.test(modifiers) ? (modifiers.includes('-') ? 'strip' : 'keep') : 'clip';
+    // An explicit indentation indicator ("|2", ">4") sets the content
+    // indentation to parentIndent + n. Ignoring it makes the parser detect
+    // the indentation from the first line instead, which breaks as soon as
+    // a later line is less indented than that — the GitHub spec has an
+    // ASCII-art block whose lines differ by one space.
+    const indicator = /^([1-9])/.exec(modifiers);
+    const declaredIndent = indicator ? parentIndent + Number(indicator[1]) : undefined;
 
     const collected: string[] = [];
     let blockIndent = -1;
@@ -284,7 +339,7 @@ class YamlParser {
       if (current === undefined) break;
       const isEmpty = current.raw.trim() === '';
       if (!isEmpty && current.indent <= parentIndent) break;
-      if (!isEmpty && blockIndent === -1) blockIndent = current.indent;
+      if (!isEmpty && blockIndent === -1) blockIndent = declaredIndent ?? current.indent;
       // A non-empty line indented less than the block content (but more than
       // the parent) ends the block scalar. Silently swallowing it would
       // corrupt the value.
@@ -354,6 +409,45 @@ class YamlParser {
     }
     return parseFlow(text, line.num, this.anchors);
   }
+}
+
+// True when a double-quoted scalar ends with an odd number of backslashes,
+// i.e. with a real line continuation rather than an escaped backslash.
+function endsWithLineContinuation(text: string): boolean {
+  let i = text.length - 1;
+  while (i >= 0 && text[i] === '\\') i -= 1;
+  return (text.length - 1 - i) % 2 === 1;
+}
+
+// True when a quoted scalar that starts at position 0 has not been closed
+// yet, which means the following (more indented) line continues it.
+function quotedStillOpen(text: string): boolean {
+  const quote = text[0];
+  if (quote !== '"' && quote !== "'") return false;
+
+  let i = 1;
+  while (i < text.length) {
+    const ch = text[i] as string;
+    if (quote === "'") {
+      if (ch === "'") {
+        // "''" is an escaped single quote inside the scalar.
+        if (text[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        return false;
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === '"') return false;
+    i += 1;
+  }
+  return true;
 }
 
 function isSequenceEntry(text: string): boolean {

@@ -465,3 +465,69 @@ test('security-requirement-defined exempts whole path segments only', () => {
   assert.equal(findings.length, 1);
   assert.match(findings[0]?.operation ?? '', /GET \/users\/login-history/);
 });
+
+test('schema-required-property-defined understands composed schemas', () => {
+  // BUG-29: OpenAPI 3.1 documents put "required" on the parent while
+  // "properties" lives in an allOf branch, or in a sibling branch.
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'components:',
+      '  schemas:',
+      '    Parent:',
+      '      type: object',
+      '      required: [id]',
+      '      allOf:',
+      '        - properties:',
+      '            id:',
+      '              type: string',
+      '    Siblings:',
+      '      allOf:',
+      '        - properties:',
+      '            id:',
+      '              type: string',
+      '        - required: [id]',
+      'paths: {}',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['schema-required-property-defined'] }).findings;
+  assert.equal(findings.length, 0, JSON.stringify(findings, null, 2));
+});
+
+test('schema-required-property-defined does not report through a $ref', () => {
+  // BUG-29: walking into a referenced schema reported the problem at the
+  // reference site, whose pointer (".../oneOf/0/required") resolves to
+  // nothing. The component is checked under its own name instead.
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'components:',
+      '  schemas:',
+      '    Wrapper:',
+      '      type: object',
+      '      properties:',
+      '        item:',
+      '          oneOf:',
+      '            - $ref: "#/components/schemas/Base"',
+      '    Base:',
+      '      type: object',
+      '      required: [id]',
+      '      properties:',
+      '        id:',
+      '          type: string',
+      'paths: {}',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['schema-required-property-defined'] }).findings;
+  assert.equal(findings.length, 0, JSON.stringify(findings, null, 2));
+});

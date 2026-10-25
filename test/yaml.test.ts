@@ -185,3 +185,45 @@ test('content after a closed flow collection is an error', () => {
   // Well-formed flow collections are unaffected.
   assert.deepEqual(parseYaml('a: [1, 2]\nb: {c: 3}'), { a: [1, 2], b: { c: 3 } });
 });
+
+test('a quoted scalar may span several lines', () => {
+  // BUG-27: real documents (the OpenAI spec) wrap long strings across
+  // lines; the continuation is folded into one space.
+  assert.deepEqual(parseYaml("a: 'first\n  second'"), { a: 'first second' });
+  assert.deepEqual(parseYaml('a: "first\n  second"'), { a: 'first second' });
+  assert.deepEqual(parseYaml('a: "Supported anchors: `created_at`. Note\n  that it is a file time."'), {
+    a: 'Supported anchors: `created_at`. Note that it is a file time.',
+  });
+});
+
+test('a backslash at the end of a double-quoted scalar continues the line', () => {
+  // BUG-27: no space is inserted and the newline disappears.
+  assert.deepEqual(parseYaml('a: "#/components/schemas/FileCitationObjec\\\n      t"'), {
+    a: '#/components/schemas/FileCitationObject',
+  });
+  // An escaped backslash is not a continuation.
+  assert.deepEqual(parseYaml('a: "ends with backslash \\\\\n  and more"'), { a: 'ends with backslash \\ and more' });
+});
+
+test('an empty line inside a multi-line quoted scalar is kept', () => {
+  // The blank line becomes a newline; the next line's indentation is stripped.
+  assert.deepEqual(parseYaml("a: 'one\n\n  two'"), { a: 'one\ntwo' });
+});
+
+test('a multi-line plain scalar continues inside a sequence item', () => {
+  // BUG-28: the continuation line is at the same column as the content.
+  assert.deepEqual(parseYaml('x:\n  - ""\n  - first line\n    second line\n  - ""\n'), {
+    x: ['', 'first line second line', ''],
+  });
+});
+
+test('a continuation line may start with a dash', () => {
+  // BUG-28: a more indented "- " cannot start a sequence item.
+  assert.deepEqual(parseYaml('a: the filename\n  - for example, x\n'), { a: 'the filename - for example, x' });
+});
+
+test('a block scalar honours an explicit indentation indicator', () => {
+  // BUG-30: "|2" sets the content indentation to parent + 2; the extra
+  // leading spaces belong to the content itself.
+  assert.deepEqual(parseYaml('a: |2\n     deep\n    less\n'), { a: '   deep\n  less\n' });
+});
