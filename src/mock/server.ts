@@ -36,10 +36,20 @@ export function compilePath(template: string): { regex: RegExp; paramNames: stri
   const pattern = template
     .split('/')
     .map((segment) => {
-      const match = /^\{(.+)\}$/.exec(segment);
-      if (!match) return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      paramNames.push(match[1] as string);
-      return '([^/]+)';
+      // Split on "{param}" so a segment may mix parameters and literal text
+      // ("/files/{name}.json", "/a/{x}-{y}/b", "/v{ver}/x"): capture groups
+      // are emitted for parameters, everything else is escaped verbatim.
+      const parts = segment.split(/\{([^}]+)\}/);
+      let out = '';
+      for (let i = 0; i < parts.length; i += 1) {
+        if (i % 2 === 1) {
+          paramNames.push(parts[i] as string);
+          out += '([^/]+)';
+        } else {
+          out += (parts[i] as string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+      }
+      return out;
     })
     .join('/');
 
@@ -165,7 +175,14 @@ async function handleRequest(
   }
 
   if (match.operation.raw['x-method-not-allowed'] === true) {
-    response.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET' });
+    const allowed = [
+      ...new Set(
+        routes
+          .filter((route) => route.regex.test(pathname))
+          .map((route) => route.operation.method.toUpperCase()),
+      ),
+    ].sort();
+    response.writeHead(405, { 'Content-Type': 'application/json', Allow: allowed.join(', ') });
     response.end(`${JSON.stringify({ error: 'method_not_allowed', message: `${request.method} is not allowed on ${pathname}` }, null, 2)}\n`);
     return;
   }

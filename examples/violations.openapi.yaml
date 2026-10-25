@@ -129,6 +129,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Widget'
+  /nameless:
+    get:
+      operationId: getNameless
+      summary: Nameless parameter
+      description: A parameter that forgot its name.
+      tags:
+        - declared
+      parameters:
+        - in: query
+          description: A parameter without a name.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
   /silent:
     get:
       operationId: getSilent

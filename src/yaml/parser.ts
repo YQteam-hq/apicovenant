@@ -39,17 +39,19 @@ class YamlParser {
   private readonly anchors = new Map<string, unknown>();
 
   constructor(source: string) {
-    this.lines = source
-      .replace(/\r\n?/g, '\n')
-      .split('\n')
-      .map((raw, i) => {
-        const indent = raw.length - raw.trimStart().length;
-        const stripped = stripComment(raw);
+    const rawLines = source.replace(/\r\n?/g, '\n').split('\n');
+    // A trailing newline leaves a final empty element behind that is an
+    // artifact of split(), not a real line. Drop it so block scalars can
+    // count their genuine trailing empty lines (keep chomping, "|+" / ">+").
+    if (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') rawLines.pop();
+    this.lines = rawLines.map((raw, i) => {
+      const indent = raw.length - raw.trimStart().length;
+      const stripped = stripComment(raw);
 
-        const text = stripped.slice(indent).replace(/\s+$/, '');
-        const blank = text.trim() === '';
-        return { indent, text: blank ? '' : text, raw, num: i + 1, blank };
-      });
+      const text = stripped.slice(indent).replace(/\s+$/, '');
+      const blank = text.trim() === '';
+      return { indent, text: blank ? '' : text, raw, num: i + 1, blank };
+    });
   }
 
   parseDocument(): unknown {
@@ -157,6 +159,20 @@ class YamlParser {
       if (content === '') {
         this.index += 1;
         items.push(this.parseChildBlock(indent));
+        continue;
+      }
+
+      if (isSequenceEntry(content)) {
+        // Compact nested sequence: "- - 1"
+        this.lines[this.index] = { ...line, indent: contentIndent, text: content };
+        items.push(this.parseSequence(contentIndent));
+        continue;
+      }
+
+      if (content.startsWith('|') || content.startsWith('>')) {
+        // Block scalar as a sequence item: "- |"
+        this.index += 1;
+        items.push(this.parseBlockScalar(content, indent));
         continue;
       }
 
@@ -269,11 +285,19 @@ class YamlParser {
       const isEmpty = current.raw.trim() === '';
       if (!isEmpty && current.indent <= parentIndent) break;
       if (!isEmpty && blockIndent === -1) blockIndent = current.indent;
+      // A non-empty line indented less than the block content (but more than
+      // the parent) ends the block scalar. Silently swallowing it would
+      // corrupt the value.
+      if (!isEmpty && current.indent < blockIndent) break;
       collected.push(isEmpty ? '' : current.raw.slice(Math.min(blockIndent, current.indent)));
       this.index += 1;
     }
 
-    while (collected.length > 0 && collected[collected.length - 1] === '') collected.pop();
+    let trailingEmpties = 0;
+    while (collected.length > 0 && collected[collected.length - 1] === '') {
+      collected.pop();
+      trailingEmpties += 1;
+    }
 
     let body: string;
     if (style === '|') {
@@ -306,7 +330,7 @@ class YamlParser {
     }
 
     if (chomp === 'strip') return body;
-    if (chomp === 'keep') return `${body}\n`;
+    if (chomp === 'keep') return `${body}\n${'\n'.repeat(trailingEmpties)}`;
     return body === '' ? '' : `${body}\n`;
   }
 
@@ -328,7 +352,7 @@ class YamlParser {
       text += next.text;
       this.index += 1;
     }
-    return parseFlow(text, line.num);
+    return parseFlow(text, line.num, this.anchors);
   }
 }
 
@@ -555,7 +579,7 @@ function stripComment(raw: string): string {
   return raw;
 }
 
-function parseFlow(text: string, lineNum: number): unknown {
+function parseFlow(text: string, lineNum: number, anchors: Map<string, unknown>): unknown {
   let pos = 0;
 
   const skipWs = (): void => {
@@ -566,6 +590,15 @@ function parseFlow(text: string, lineNum: number): unknown {
     skipWs();
     const ch = text[pos];
     if (ch === undefined) throw new YamlError('Unexpected end of flow collection', lineNum);
+    if (ch === '*') {
+      // Alias inside a flow collection: "[*anchor]" / "{k: *anchor}".
+      pos += 1;
+      const start = pos;
+      while (pos < text.length && !',]}\n'.includes(text[pos] as string)) pos += 1;
+      const name = text.slice(start, pos).trim();
+      if (!anchors.has(name)) throw new YamlError(`Unknown alias "*${name}"`, lineNum);
+      return anchors.get(name);
+    }
     if (ch === '[') return parseSeq();
     if (ch === '{') return parseMap();
     if (ch === '"' || ch === "'") {

@@ -89,6 +89,21 @@ test('parseGoldenFile rejects malformed input', () => {
   assert.throws(() => parseGoldenFile('{"apicovenant":99,"interactions":[]}'), /format version/);
 });
 
+test('parseGoldenFile accepts a byte order mark', () => {
+  const file = widgetGolden();
+  const withBom = `\uFEFF${serializeGoldenFile(file)}`;
+  const parsed = parseGoldenFile(withBom);
+  assert.equal(parsed.interactions.length, 1);
+  assert.equal(parsed.interactions[0]?.path, '/widgets');
+});
+
+test('parseGoldenFile reports which interaction is malformed', () => {
+  const file = widgetGolden();
+  file.interactions.push(null as unknown as (typeof file.interactions)[number]);
+  const text = serializeGoldenFile(file);
+  assert.throws(() => parseGoldenFile(text), /interactions\[1\] must be an object/);
+});
+
 test('interactionKey is stable and includes the query', () => {
   assert.equal(interactionKey({ method: 'GET', path: '/a', query: { b: '2', a: '1' } }), 'GET /a?a=1&b=2');
   assert.equal(interactionKey({ method: 'GET', path: '/a' }), 'GET /a');
@@ -160,6 +175,28 @@ test('a mock that breaks its own spec is kept out of the drift verdict', async (
   assert.equal(report.summary.changed, 0);
   assert.equal(report.interactions[0]?.schemaViolations.length, 0);
   assert.equal(report.interactions[0]?.mockViolations.length, 1);
+});
+
+test('the report addresses an interaction by method, path and query', async () => {
+  // BUG-12: the report key used to drop the query string, so two
+  // interactions that differed only by query collided.
+  const file = createGoldenFile('http://example.com', 'openapi.yaml');
+  file.interactions.push({
+    method: 'GET',
+    path: '/widgets',
+    query: { page: '2' },
+    requestHeaders: {},
+    status: 200,
+    responseHeaders: { 'content-type': 'application/json' },
+    body: '{"name":123}',
+    bodyType: 'json',
+    durationMs: 1,
+  });
+
+  const report = await compareGolden(file, widgetSource(false));
+  assert.equal(report.interactions.length, 1);
+  assert.equal(report.interactions[0]?.key, 'GET /widgets?page=2');
+  assert.equal(report.summary.changed, 0);
 });
 
 test('a dropped connection is retried for a safe request', async () => {

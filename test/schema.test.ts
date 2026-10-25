@@ -241,3 +241,56 @@ test('deepEqual compares structurally', () => {
   assert.equal(deepEqual({ a: 1 }, { a: 2 }), false);
   assert.equal(deepEqual([1, 2], [1, 2, 3]), false);
 });
+
+test('generateExample satisfies common string patterns', () => {
+  const patterns = [
+    '^[a-z]+$',
+    '^[A-Z][a-z]+$',
+    '^\\d{3}-\\d{4}$',
+    '^[0-9a-f]{8}$',
+    '^(foo|bar)$',
+    '^v\\d+\\.\\d+\\.\\d+$',
+    '^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$',
+    '^SK-[A-Za-z0-9]{6}$',
+    '^(?:abc)+$',
+    '^a?b?c$',
+    '^x{2,4}$',
+    '^\\w+$',
+    '^[^0-9]+$',
+    '^-?\\d+$',
+    '^(cat|dog|bird)s?$',
+    '^ID_\\d{4}$',
+    '^[A-Z]{2}\\d{6}$',
+    '^\\(\\d{3}\\)\\s?\\d{3}-\\d{4}$',
+    '^.*$',
+    '^a*b*c*$',
+    '^[a|b]+$',
+  ];
+  for (const pattern of patterns) {
+    const example = generateExample({ type: 'string', pattern }, { includeOptional: true });
+    assert.equal(typeof example, 'string', `${pattern} produced a non-string`);
+    assert.ok(new RegExp(pattern).test(example as string), `${pattern} produced ${JSON.stringify(example)}`);
+  }
+});
+
+test('generateExample repairs a pattern broken by minLength padding', () => {
+  const example = generateExample({ type: 'string', pattern: '^\\d+$', minLength: 5 }, { includeOptional: true });
+  assert.equal(example, '00000');
+});
+
+test('generateExample prefers the pattern over a contradictory maxLength', () => {
+  // The schema itself is unsatisfiable (ten digits cannot fit in five chars);
+  // the value must at least satisfy one of the two constraints deterministically.
+  const example = generateExample({ type: 'string', pattern: '^\\d{10}$', maxLength: 5 }, { includeOptional: true });
+  assert.equal(example, '00000');
+});
+
+test('generateExample handles grouped alternation and escaped punctuation', () => {
+  const grouped = generateExample({ type: 'string', pattern: '^(cat|dog)s?$' }, { includeOptional: true });
+  assert.ok(new RegExp('^(cat|dog)s?$').test(grouped as string), JSON.stringify(grouped));
+  const phone = generateExample(
+    { type: 'string', pattern: '^\\(\\d{3}\\)\\s?\\d{3}-\\d{4}$' },
+    { includeOptional: true },
+  );
+  assert.equal(phone, '(000) 000-0000');
+});

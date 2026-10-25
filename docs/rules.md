@@ -144,7 +144,9 @@ it twice and makes the URL space grow combinatorially.
 
 Collection paths should be plural: `/users` lists, `/users/{id}` addresses one
 item. A small allow list (`health`, `status`, `me`, `settings`, …) is
-recognised as intentionally singular.
+recognised as intentionally singular, and filtered views such as
+`/users/active` or `/orders/recent` are exempt because they name a view of a
+collection, not a collection of their own.
 
 ### `path-parameter-defined` · error
 
@@ -159,6 +161,12 @@ the operation level count as well.
 ### `parameter-required-path` · error
 
 A path parameter is part of the URL and can never be optional.
+
+### `parameter-name-required` · error
+
+Every parameter must declare a `name`. The OpenAPI specification requires it,
+and a nameless parameter would otherwise be dropped from the model and escape
+every other parameter rule.
 
 ### `parameter-duplicate` · warn
 

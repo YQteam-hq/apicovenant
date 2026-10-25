@@ -3,14 +3,21 @@ import { isPlainObject } from '../util/text.ts';
 export interface DerefOptions {
 
   maxDepth?: number;
-
-  shallow?: boolean;
 }
 
 export function resolveLocalRef(doc: unknown, ref: string): unknown {
   if (ref === '#' || ref === '#/') return doc;
   if (!ref.startsWith('#/')) {
-    throw new Error(`Only local references are supported, got "${ref}"`);
+    if (ref.startsWith('#')) {
+      // A "#"-prefixed reference that is neither "#" nor "#/..." is a
+      // malformed JSON Pointer.
+      throw new Error(`Invalid local reference "${ref}": expected "#" or "#/..."`);
+    }
+    // External references (e.g. "common.yaml#/components/schemas/Foo") are
+    // valid OpenAPI but out of scope for this tool. Report them as
+    // unresolved instead of throwing: every caller already degrades
+    // gracefully when resolution yields undefined.
+    return undefined;
   }
 
   const tokens = ref
@@ -34,12 +41,6 @@ export function resolveLocalRef(doc: unknown, ref: string): unknown {
 
 export function isRefNode(node: unknown): node is { $ref: string } {
   return isPlainObject(node) && typeof node['$ref'] === 'string';
-}
-
-export function resolveRefOnce(doc: unknown, node: unknown): unknown {
-  if (!isRefNode(node)) return node;
-  const resolved = resolveLocalRef(doc, node.$ref);
-  return resolved === undefined ? node : resolved;
 }
 
 export function deref(doc: unknown, node: unknown, options: DerefOptions = {}): unknown {
@@ -71,19 +72,6 @@ export function deref(doc: unknown, node: unknown, options: DerefOptions = {}): 
 
     return current;
   };
-
-  if (options.shallow) {
-    if (isRefNode(node)) return resolveRefOnce(doc, node);
-    if (Array.isArray(node)) return node.map((item) => walk(item, 1));
-    if (isPlainObject(node)) {
-      const out: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(node)) {
-        out[key] = walk(value, 1);
-      }
-      return out;
-    }
-    return node;
-  }
 
   return walk(node, 0);
 }

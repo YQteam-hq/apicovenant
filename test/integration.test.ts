@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { gzipSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadSpecFile } from '../src/spec/loader.ts';
+import { loadSpecFile, loadSpecFromText } from '../src/spec/loader.ts';
 import { startMockServer } from '../src/mock/server.ts';
 import { startRecorder } from '../src/record/recorder.ts';
 import { compareGolden, HttpLiveSource } from '../src/diff/compare.ts';
@@ -59,6 +60,180 @@ test('the mock server exposes a route table', async () => {
     assert.ok(body.routes.length > 0);
     assert.ok(body.routes.some((route) => route.path === '/users'));
   });
+});
+
+async function withSpec<T>(specText: string, fn: (url: string) => Promise<T>): Promise<T> {
+  const spec = loadSpecFromText(specText);
+  const handle = await startMockServer(spec);
+  try {
+    return await fn(handle.url);
+  } finally {
+    await handle.close();
+  }
+}
+
+test('the mock server routes a path with a parameter suffix', async () => {
+  // BUG-19: "/files/{name}.json" used to be treated as a literal segment.
+  await withSpec(
+    JSON.stringify({
+      openapi: '3.0.3',
+      info: { title: 'Files', version: '1.0.0' },
+      paths: {
+        '/files/{name}.json': {
+          get: {
+            operationId: 'getFile',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: { name: { type: 'string' } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    async (url) => {
+      const response = await fetch(`${url}/files/report.json`);
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as { name: string };
+      assert.equal(typeof body.name, 'string');
+    },
+  );
+});
+
+test('a 405 response lists the methods the route really supports', async () => {
+  // BUG-6: the Allow header came from the first matching route only.
+  await withMock(async (url) => {
+    const response = await fetch(`${url}/users`, { method: 'DELETE' });
+    assert.equal(response.status, 405);
+    const allow = response.headers.get('allow') ?? '';
+    assert.ok(allow.includes('GET'), `Allow was "${allow}"`);
+    assert.ok(allow.includes('POST'), `Allow was "${allow}"`);
+  });
+});
+
+test('the mock server falls back to the documented default response', async () => {
+  // BUG-7: an undocumented status code used to be answered with the 200 body.
+  await withSpec(
+    JSON.stringify({
+      openapi: '3.0.3',
+      info: { title: 'Widgets', version: '1.0.0' },
+      paths: {
+        '/widgets': {
+          get: {
+            operationId: 'listWidgets',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: { name: { type: 'string' } } },
+                  },
+                },
+              },
+              default: {
+                description: 'error',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['code'],
+                      properties: { code: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    async (url) => {
+      const response = await fetch(`${url}/widgets?x-mock-status=503`);
+      assert.equal(response.status, 503);
+      const body = (await response.json()) as Record<string, unknown>;
+      assert.ok('code' in body, `default response body was ${JSON.stringify(body)}`);
+    },
+  );
+});
+
+test('an operation-level x-mock.status wins over the query parameter', async () => {
+  // BUG-20: "?x-mock-status=503" used to override "x-mock.status: 500".
+  await withSpec(
+    JSON.stringify({
+      openapi: '3.0.3',
+      info: { title: 'Widgets', version: '1.0.0' },
+      paths: {
+        '/widgets': {
+          get: {
+            operationId: 'listWidgets',
+            'x-mock': { status: 500, body: { code: 'boom' } },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: { name: { type: 'string' } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    async (url) => {
+      const response = await fetch(`${url}/widgets?x-mock-status=503`);
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), { code: 'boom' });
+    },
+  );
+});
+
+test('the recorder forwards a decompressed body without stale framing headers', async () => {
+  // BUG-1: content-encoding/content-length/transfer-encoding used to be
+  // forwarded verbatim, describing the compressed byte stream.
+  const payload = JSON.stringify({ items: [1, 2, 3], note: 'compressed body' });
+  const upstream = http.createServer((_request, response) => {
+    const compressed = gzipSync(payload);
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Encoding': 'gzip',
+      'Content-Length': String(compressed.length),
+    });
+    response.end(compressed);
+  });
+
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const address = upstream.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+
+  const recorder = await startRecorder({ target: `http://127.0.0.1:${port}` });
+  const response = await fetch(`${recorder.url}/download`);
+  const golden = recorder.stop();
+
+  await new Promise<void>((resolve) => upstream.close(() => resolve()));
+
+  assert.equal(response.status, 200);
+  // The forwarded body is decompressed, so none of the compressed-stream
+  // framing headers may survive: fetch() would reject a body whose
+  // content-length disagrees with the bytes it actually received. Node
+  // re-frames the response (chunked) instead of passing the stale length on.
+  assert.equal(response.headers.get('content-encoding'), null);
+  assert.equal(response.headers.get('content-length'), null);
+  assert.deepEqual(await response.json(), { items: [1, 2, 3], note: 'compressed body' });
+
+  const interaction = golden.interactions[0];
+  assert.ok(interaction);
+  // The recording keeps the upstream headers verbatim but the body it stores
+  // is the decompressed text.
+  assert.equal(interaction.responseHeaders['content-encoding'], 'gzip');
+  assert.equal(interaction.bodyType, 'json');
+  assert.deepEqual(JSON.parse(interaction.body), { items: [1, 2, 3], note: 'compressed body' });
 });
 
 test('the mock server honours the x-mock-status query parameter', async () => {

@@ -48,8 +48,6 @@ export interface SchemaViolation {
 export interface ValidateOptions {
 
   maxErrors?: number;
-
-  skipProperties?: Set<string>;
 }
 
 const TYPE_CHECKS: Record<string, (value: unknown) => boolean> = {
@@ -151,7 +149,6 @@ export function validateSchema(value: unknown, schema: unknown, options: Validat
       }
 
       for (const [key, child] of Object.entries(val)) {
-        if (options.skipProperties?.has(key)) continue;
         const childSchema = properties[key];
         if (childSchema) {
           visit(child, childSchema, `${path}/${key}`, `${schemaPath}/properties/${key}`);
@@ -559,11 +556,70 @@ const PATTERN_ESCAPES: Record<string, string> = {
   D: 'x',
   W: 'x',
   S: 'x',
+  // Escaped punctuation maps to itself: "\." is a literal dot, "\(" a literal
+  // parenthesis. Without these entries the whole fill is abandoned, so common
+  // patterns like "^v\d+\.\d+\.\d+$" silently fall back to a placeholder.
+  '.': '.',
+  '(': '(',
+  ')': ')',
+  '[': '[',
+  ']': ']',
+  '{': '{',
+  '}': '}',
+  '-': '-',
+  '+': '+',
+  '*': '*',
+  '?': '?',
+  '|': '|',
+  '^': '^',
+  '$': '$',
+  '/': '/',
+  ':': ':',
+  ',': ',',
+  '=': '=',
+  '!': '!',
+  '<': '<',
+  '>': '>',
+  '"': '"',
+  "'": "'",
+  '`': '`',
+  '~': '~',
+  '#': '#',
+  '&': '&',
+  ';': ';',
+  '@': '@',
+  '%': '%',
 };
 
 interface PatternFill {
   value: string;
   end: number;
+}
+
+// Index of the first "|" that is a real alternation: outside any group and
+// outside any character class. "a|b" alternates; "(a|b)" and "[a|b]" do not.
+function topLevelAlternation(text: string): number {
+  let depth = 0;
+  let inClass = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false;
+      continue;
+    }
+    if (ch === '[') {
+      inClass = true;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    else if (ch === '|' && depth === 0) return i;
+  }
+  return -1;
 }
 
 // Reverse-fills a common subset of regular expressions (character classes,
@@ -572,7 +628,7 @@ interface PatternFill {
 // fill, so callers can fall back to their existing candidates.
 function fillPattern(pattern: string): string | undefined {
   let body = pattern.replace(/^\^/, '').replace(/\$$/, '');
-  const alt = body.indexOf('|');
+  const alt = topLevelAlternation(body);
   if (alt !== -1) body = body.slice(0, alt); // fill the first alternative
 
   const parse = (text: string, start: number): PatternFill | undefined => {
@@ -586,12 +642,33 @@ function fillPattern(pattern: string): string | undefined {
 
       if (ch === '(') {
         let j = i + 1;
-        if (text[j] === '?') j += 1; // skip (?: (?= (?! (?<= look-around prefixes
+        if (text[j] === '?') {
+          // Skip the whole prefix: "(?:", "(?=", "(?!", "(?<=", "(?<!".
+          // Skipping only "?" would leak the marker character into the output.
+          const marker = text[j + 1];
+          j += marker === '<' ? 3 : marker === ':' || marker === '=' || marker === '!' ? 2 : 1;
+        }
         const inner = parse(text, j);
         if (!inner) return undefined;
         out += inner.value;
         lastToken = inner.value;
         i = inner.end;
+        // The group contained alternation ("(a|b)"): skip the branches that
+        // were not filled, up to the group's closing parenthesis.
+        if (text[i - 1] === '|') {
+          let depth = 1;
+          while (i < text.length && depth > 0) {
+            const c = text[i];
+            if (c === '\\') {
+              i += 1;
+            } else if (c === '(') {
+              depth += 1;
+            } else if (c === ')') {
+              depth -= 1;
+            }
+            i += 1;
+          }
+        }
         continue;
       }
 
@@ -695,6 +772,25 @@ function constrainString(value: string, schema: JsonSchema, key: string): string
   }
   if (typeof schema.maxLength === 'number' && result.length > schema.maxLength) {
     result = result.slice(0, schema.maxLength);
+  }
+
+  // Padding or truncation can break the pattern the value was chosen for
+  // ("^\d+$" + minLength 5 used to produce "0xxxx"). Re-validate and repair.
+  if (typeof schema.pattern === 'string') {
+    try {
+      const pattern = new RegExp(schema.pattern);
+      if (pattern.test(result)) return result;
+      const filled = fillPattern(schema.pattern);
+      if (filled === undefined || filled.length === 0) return result;
+      const min = typeof schema.minLength === 'number' ? schema.minLength : 0;
+      const max = typeof schema.maxLength === 'number' ? schema.maxLength : Infinity;
+      let candidate = filled;
+      while (candidate.length < min && candidate.length < 64) candidate += filled;
+      if (pattern.test(candidate) && candidate.length >= min && candidate.length <= max) return candidate;
+      if (pattern.test(filled) && filled.length <= max) return filled;
+    } catch {
+      // An invalid pattern cannot be satisfied; keep the current value.
+    }
   }
 
   return result;

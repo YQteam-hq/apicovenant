@@ -79,11 +79,16 @@ export function parseBaseline(text: string, filePath = '<baseline>'): BaselineFi
     apicovenant: BASELINE_FORMAT_VERSION,
     createdAt: typeof file.createdAt === 'string' ? file.createdAt : new Date().toISOString(),
     updatedAt: typeof file.updatedAt === 'string' ? file.updatedAt : new Date().toISOString(),
-    findings: file.findings.map((entry) => ({
-      ruleId: String(entry.ruleId ?? ''),
-      path: String(entry.path ?? ''),
-      message: String(entry.message ?? ''),
-    })),
+    findings: file.findings.map((entry, index) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        throw new Error(`${filePath}: findings[${index}] must be an object`);
+      }
+      return {
+        ruleId: String(entry.ruleId ?? ''),
+        path: String(entry.path ?? ''),
+        message: String(entry.message ?? ''),
+      };
+    }),
   };
 }
 

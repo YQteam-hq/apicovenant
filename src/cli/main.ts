@@ -12,7 +12,7 @@ import {
   RECORD_HELP,
   RULES_HELP,
 } from './help.ts';
-import { UsageError, describeError, parseInteger, parseSeverity, splitList } from './common.ts';
+import { UsageError, describeError, parseFailOn, parseInteger, parseSeverity, splitList } from './common.ts';
 import { runLint, renderRuleCatalogue } from './commands/lint.ts';
 import { runMock } from './commands/mock.ts';
 import { runRecord } from './commands/record.ts';
@@ -86,6 +86,22 @@ const HELP_BY_COMMAND: Record<string, string> = {
   mcp: MCP_HELP,
 };
 
+// Options each command accepts. A single global option table would silently
+// swallow options that belong to a different command (e.g. "mock --baseline").
+const COMMAND_OPTIONS: Record<string, readonly (keyof typeof OPTIONS)[]> = {
+  lint: ['format', 'output', 'rules', 'ignore', 'severity', 'fail-on', 'list-rules',
+         'config', 'baseline', 'update-baseline', 'no-baseline'],
+  mock: ['port', 'host', 'latency'],
+  record: ['target', 'out', 'spec', 'host', 'port', 'max-requests', 'duration'],
+  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output'],
+  rules: ['format', 'category'],
+  init: ['output', 'force'],
+  mcp: [],
+};
+
+// Accepted everywhere, on every command.
+const GLOBAL_OPTIONS = new Set<keyof typeof OPTIONS>(['help', 'version']);
+
 
 export async function run(argv: string[]): Promise<number> {
   let parsed: { values: ParsedValues; positionals: string[] };
@@ -111,6 +127,15 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   try {
+    const allowedOptions = COMMAND_OPTIONS[command];
+    if (allowedOptions) {
+      for (const key of Object.keys(values) as (keyof typeof OPTIONS)[]) {
+        if (values[key] === undefined) continue;
+        if (GLOBAL_OPTIONS.has(key) || allowedOptions.includes(key)) continue;
+        throw new UsageError(`option --${key} is not valid for the "${command}" command`);
+      }
+    }
+
     switch (command) {
       case 'lint':
         return await runLint({
@@ -127,9 +152,7 @@ export async function run(argv: string[]): Promise<number> {
           severity: asString(values.severity)
             ? parseSeverity(asString(values.severity), 'info')
             : undefined,
-          failOn: asString(values['fail-on'])
-            ? (asString(values['fail-on']) as 'error' | 'warn' | 'never')
-            : undefined,
+          failOn: parseFailOn(asString(values['fail-on']), ['error', 'warn', 'never'] as const),
           listRules: asBoolean(values['list-rules']),
           config: asString(values.config),
           baseline: asString(values.baseline),
@@ -172,9 +195,7 @@ export async function run(argv: string[]): Promise<number> {
                 | 'html')
             : undefined,
           replayAll: asBoolean(values['replay-all']),
-          failOn: asString(values['fail-on'])
-            ? (asString(values['fail-on']) as 'changed' | 'never')
-            : undefined,
+          failOn: parseFailOn(asString(values['fail-on']), ['changed', 'never'] as const),
           config: asString(values.config),
           output: asString(values.output),
         });

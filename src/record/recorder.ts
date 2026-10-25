@@ -145,7 +145,11 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
 
       const outHeaders: Record<string, string | string[]> = {};
       upstream.headers.forEach((value, name) => {
-        if (name.toLowerCase() === 'content-encoding') return;
+        const lower = name.toLowerCase();
+        // fetch() already decompressed the body, so the upstream framing
+        // headers describe a different byte stream than the one we forward.
+        // Drop them and let Node re-frame the response.
+        if (lower === 'content-encoding' || lower === 'content-length' || lower === 'transfer-encoding') return;
         outHeaders[name] = value;
       });
 

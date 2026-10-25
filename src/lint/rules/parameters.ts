@@ -103,8 +103,35 @@ export const parameterNoQueryApiKey: RuleDefinition = {
   },
 };
 
+export const parameterNameRequired: RuleDefinition = {
+  id: 'parameter-name-required',
+  title: 'Parameters declare a name',
+  description:
+    'The OpenAPI specification requires every parameter to carry a "name". A nameless ' +
+    'parameter used to be dropped from the model entirely, which let it escape every ' +
+    'other parameter rule.',
+  severity: 'error',
+  category: 'parameters',
+  keywords: ['parameter', 'name', 'required'],
+  check({ spec, report }) {
+    for (const operation of spec.operations) {
+      for (const parameter of operation.parameters) {
+        if (parameter.name !== '') continue;
+        const index = parameter.pointer.split('/').pop() ?? '?';
+        report({
+          message: `Parameter #${index} of ${operation.key} has no "name"`,
+          path: parameter.pointer,
+          operation: operation.key,
+          hint: 'Add a "name" to the parameter, or remove it.',
+        });
+      }
+    }
+  },
+};
+
 export const parameterRules = [
   parameterRequiredPath,
+  parameterNameRequired,
   parameterDuplicate,
   parameterDescription,
   parameterNoQueryApiKey,

@@ -3,7 +3,7 @@ import { validateSchema, type SchemaViolation } from '../spec/schema.ts';
 import { deref, followRef } from '../spec/ref.ts';
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import { diffJson, parseBody, type BodyDifference } from './json-diff.ts';
-import type { GoldenFile, GoldenInteraction } from '../record/golden.ts';
+import { interactionKey, type GoldenFile, type GoldenInteraction } from '../record/golden.ts';
 
 export interface LiveResponse {
   status: number;
@@ -225,7 +225,9 @@ export async function compareGolden(
   const interactions: InteractionDiff[] = [];
 
   for (const interaction of golden.interactions) {
-    const key = `${interaction.method} ${interaction.path}`;
+    // The key includes the query string so two interactions that differ only
+    // by query parameters stay distinguishable in the report.
+    const key = interactionKey(interaction);
 
     if (!options.replayAll && !SAFE_METHODS.has(interaction.method.toUpperCase())) {
       interactions.push({

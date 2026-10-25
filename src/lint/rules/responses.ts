@@ -5,6 +5,10 @@ import { isRefNode, refName } from '../../spec/ref.ts';
 const VALID_STATUS = /^(?:[1-5]\d{2}|default)$/;
 const BODYLESS_STATUS = new Set(['204', '205', '304', '101']);
 
+// 1xx (informational) and 3xx (redirection) responses carry no body by
+// definition — only 304 is special enough to list explicitly.
+const BODYLESS_RANGE = /^[13]\d\d$/;
+
 function isErrorStatus(status: string): boolean {
   return status.startsWith('4') || status.startsWith('5');
 }
@@ -96,6 +100,7 @@ export const responseSchemaRequired: RuleDefinition = {
     for (const operation of spec.operations) {
       for (const response of operation.responses.values()) {
         if (BODYLESS_STATUS.has(response.status)) continue;
+        if (BODYLESS_RANGE.test(response.status)) continue;
 
         if (response.content.size === 0) {
           report({

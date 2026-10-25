@@ -153,7 +153,11 @@ const LINT_TOOL: McpToolDefinition = {
 
   async run(args, context) {
     const target = requireString(args, 'path');
-    const severity = (optionalString(args, 'severity') ?? 'info') as Severity;
+    const rawSeverity = optionalString(args, 'severity');
+    if (rawSeverity !== undefined && !['error', 'warn', 'info'].includes(rawSeverity)) {
+      return errorResult(`Invalid severity "${rawSeverity}" (expected error, warn or info).`);
+    }
+    const severity = (rawSeverity ?? 'info') as Severity;
     const rules = optionalStringList(args, 'rules');
     const ignore = optionalStringList(args, 'ignore');
     const baselinePath = optionalString(args, 'baseline');

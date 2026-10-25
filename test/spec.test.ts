@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { loadSpecFromText, parseDocument, validateDocument, SpecError } from '../src/spec/loader.ts';
 import { buildSpec } from '../src/spec/model.ts';
-import { deref, followRef, isRefNode, collectRefs, refName } from '../src/spec/ref.ts';
+import { deref, followRef, isRefNode, collectRefs, refName, resolveLocalRef } from '../src/spec/ref.ts';
 import { isPlainObject } from '../src/util/text.ts';
 
 const MINIMAL = `
@@ -127,4 +127,16 @@ test('buildSpec tolerates an empty document', () => {
   const spec = buildSpec({}, 'empty');
   assert.equal(spec.operations.length, 0);
   assert.equal(spec.info.title, 'Untitled API');
+});
+
+test('an external $ref degrades to the node itself instead of throwing', () => {
+  const doc = { paths: {} };
+  const node = { $ref: 'common.yaml#/components/schemas/Thing' };
+  assert.equal(resolveLocalRef(doc, node.$ref), undefined);
+  assert.deepEqual(followRef(doc, node), node);
+  assert.deepEqual(deref(doc, node), node);
+});
+
+test('a malformed local pointer still throws', () => {
+  assert.throws(() => resolveLocalRef({}, '#not-a-pointer'), /Invalid local reference/);
 });

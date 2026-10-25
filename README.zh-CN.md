@@ -43,7 +43,7 @@
 
 | 命令 | 作用 |
 | --- | --- |
-| `apicovenant lint` | 检查 **42 条设计约定规则**，这些规则是纯 schema 校验器根本不会看的 |
+| `apicovenant lint` | 检查 **43 条设计约定规则**，这些规则是纯 schema 校验器根本不会看的 |
 | `apicovenant mock` | 基于规范起一个 mock 服务，响应体真实且可复现 |
 | `apicovenant record` | 在你的 API 前面放一个录制代理，把真实流量存成 **golden 文件** |
 | `apicovenant diff` | 重放 golden 文件，逐字段报告**行为漂移** |
@@ -122,7 +122,7 @@ GET /stock_items
 
 ### 规则清单
 
-8 个分类共 42 条规则，完整说明见 [`docs/rules.md`](docs/rules.md)。
+8 个分类共 43 条规则，完整说明见 [`docs/rules.md`](docs/rules.md)。
 
 | 分类 | 规则数 | 保护什么 |
 | --- | --- | --- |

@@ -205,3 +205,206 @@ test('findRule returns undefined for unknown ids', () => {
   assert.equal(findRule('does-not-exist'), undefined);
   assert.ok(findRule('operation-id-required'));
 });
+
+test('pagination-envelope keeps checking after an empty-properties schema', () => {
+  // A collection endpoint whose response schema has no properties must not
+  // abort the rule: every later collection endpoint is still checked.
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /widgets:',
+      '    get:',
+      '      operationId: listWidgets',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '          content:',
+      '            application/json:',
+      '              schema:',
+      '                type: object',
+      '  /gadgets:',
+      '    get:',
+      '      operationId: listGadgets',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '          content:',
+      '            application/json:',
+      '              schema:',
+      '                type: object',
+      '                properties:',
+      '                  items:',
+      '                    type: array',
+      '                    items:',
+      '                      type: string',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['pagination-envelope'] }).findings;
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]?.message ?? '', /gadgets/);
+});
+
+test('component-unused does not confuse a component with its longer-named sibling', () => {
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /users:',
+      '    get:',
+      '      operationId: listUsers',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '          content:',
+      '            application/json:',
+      '              schema:',
+      '                $ref: "#/components/schemas/UserProfile"',
+      'components:',
+      '  schemas:',
+      '    User:',
+      '      type: object',
+      '      properties:',
+      '        id:',
+      '          type: string',
+      '    UserProfile:',
+      '      type: object',
+      '      properties:',
+      '        user:',
+      '          $ref: "#/components/schemas/User"',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['component-unused'] }).findings;
+  assert.deepEqual(findings, []);
+});
+
+test('response-schema-required ignores 1xx and 3xx responses', () => {
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /old:',
+      '    get:',
+      '      operationId: getOld',
+      '      responses:',
+      '        "301":',
+      '          description: moved',
+      '        "100":',
+      '          description: continue',
+      '        "200":',
+      '          description: ok',
+      '          content:',
+      '            application/json:',
+      '              schema:',
+      '                type: object',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['response-schema-required'] }).findings;
+  assert.deepEqual(findings, []);
+});
+
+test('path-collection-plural ignores filtered views', () => {
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /users/active:',
+      '    get:',
+      '      operationId: listActiveUsers',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '          content:',
+      '            application/json:',
+      '              schema:',
+      '                type: array',
+      '                items:',
+      '                  type: string',
+      '  /order:',
+      '    get:',
+      '      operationId: listOrder',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '          content:',
+      '            application/json:',
+      '              schema:',
+      '                type: array',
+      '                items:',
+      '                  type: string',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['path-collection-plural'] }).findings;
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]?.message ?? '', /\/order/);
+});
+
+test('parameter-name-required reports a nameless parameter', () => {
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /things:',
+      '    get:',
+      '      operationId: listThings',
+      '      parameters:',
+      '        - in: query',
+      '          schema:',
+      '            type: string',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['parameter-name-required'] }).findings;
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0]?.severity, 'error');
+  assert.match(findings[0]?.message ?? '', /has no "name"/);
+});
+
+test('an invalid minSeverity does not suppress every finding', () => {
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /a:',
+      '    get:',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '',
+    ].join('\n'),
+  );
+
+  const all = lint(spec);
+  const bogus = lint(spec, { minSeverity: 'bogus' as never });
+  assert.equal(bogus.total, all.total);
+});

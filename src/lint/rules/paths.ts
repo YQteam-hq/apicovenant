@@ -55,6 +55,27 @@ const SINGULAR_EXCEPTIONS = new Set([
   'root',
 ]);
 
+// Final path segments that name a filtered view of a collection rather than a
+// collection of their own ("/users/active", "/orders/recent"). The plural
+// check would otherwise flag every one of them.
+const VIEW_SEGMENTS = new Set([
+  'active',
+  'archived',
+  'recent',
+  'current',
+  'latest',
+  'popular',
+  'trending',
+  'starred',
+  'pinned',
+  'mine',
+  'all',
+  'trash',
+  'history',
+  'summary',
+  'stats',
+]);
+
 export const pathKebabCase: RuleDefinition = {
   id: 'path-kebab-case',
   title: 'Path segments are kebab-case',
@@ -142,7 +163,9 @@ export const pathCollectionPlural: RuleDefinition = {
   title: 'Collection paths are plural',
   description:
     'Plural collection names ("/users") keep the URL space predictable: "/users" lists and ' +
-    '"/users/{id}" addresses one item. Singular collections confuse generated clients.',
+    '"/users/{id}" addresses one item. Singular collections confuse generated clients. ' +
+    'Filtered views ("/users/active") and an allow list of intentionally singular names ' +
+    'are exempt.',
   severity: 'info',
   category: 'paths',
   keywords: ['url', 'plural', 'naming'],
@@ -153,6 +176,7 @@ export const pathCollectionPlural: RuleDefinition = {
       if (!last || last.startsWith('{')) continue;
       if (last.endsWith('s')) continue;
       if (SINGULAR_EXCEPTIONS.has(last.toLowerCase())) continue;
+      if (VIEW_SEGMENTS.has(last.toLowerCase())) continue;
       report({
         message: `Collection path "${pathItem.path}" is not plural`,
         path: pathItem.pointer,
