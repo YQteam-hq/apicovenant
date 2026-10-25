@@ -408,3 +408,60 @@ test('an invalid minSeverity does not suppress every finding', () => {
   const bogus = lint(spec, { minSeverity: 'bogus' as never });
   assert.equal(bogus.total, all.total);
 });
+
+test('server-https matches the hostname, not a substring of the URL', () => {
+  // BUG-23: "http://localhost.example.com" and "http://api.127.0.0.1.x"
+  // used to be exempted because the old test searched the whole URL.
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'servers:',
+      '  - url: http://localhost.example.com/v1',
+      '  - url: http://api.127.0.0.1.attacker.net',
+      '  - url: http://localhost:3000',
+      '  - url: http://127.0.0.1:8080',
+      '  - url: http://api.local',
+      'paths: {}',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['server-https'] }).findings;
+  assert.equal(findings.length, 2);
+  assert.match(findings[0]?.message ?? '', /localhost\.example\.com/);
+  assert.match(findings[1]?.message ?? '', /attacker\.net/);
+});
+
+test('security-requirement-defined exempts whole path segments only', () => {
+  // BUG-24: "/users/login-history" used to be exempt because the path
+  // contained the substring "/login".
+  const spec = loadSpecFromText(
+    [
+      'openapi: 3.1.0',
+      'info:',
+      '  title: T',
+      '  version: "1"',
+      'paths:',
+      '  /users/login-history:',
+      '    get:',
+      '      operationId: listLoginHistory',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '  /login:',
+      '    post:',
+      '      operationId: login',
+      '      responses:',
+      '        "200":',
+      '          description: ok',
+      '',
+    ].join('\n'),
+  );
+
+  const findings = lint(spec, { rules: ['security-requirement-defined'] }).findings;
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]?.operation ?? '', /GET \/users\/login-history/);
+});

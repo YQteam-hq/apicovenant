@@ -84,8 +84,9 @@ export const serverHttps: RuleDefinition = {
     const servers = spec.servers;
     servers.forEach((server, index) => {
       if (!server.url.startsWith('http://')) return;
-      const isLocal = /localhost|127\.0\.0\.1|\.local\b/.test(server.url);
-      if (isLocal) return;
+      // Match the hostname exactly: a substring test would exempt
+      // "http://localhost.example.com" or "http://api.127.0.0.1.attacker.net".
+      if (isLocalHostname(server.url)) return;
       report({
         message: `Server "${server.url}" uses plain HTTP`,
         path: `/servers/${index}/url`,
@@ -94,6 +95,24 @@ export const serverHttps: RuleDefinition = {
     });
   },
 };
+
+function isLocalHostname(url: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    // An unparseable host is not known to be local.
+    return false;
+  }
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '[::1]' ||
+    hostname === '::1' ||
+    hostname.endsWith('.local')
+  );
+}
 
 export const tagDeclared: RuleDefinition = {
   id: 'tag-declared',
