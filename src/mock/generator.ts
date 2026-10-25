@@ -23,12 +23,9 @@ export function selectResponse(operation: Operation, requestedStatus?: number): 
   if (requestedStatus !== undefined) {
     const exact = responses.find((response) => response.status === String(requestedStatus));
     if (exact) return exact;
-    const range = responses.find((response) => {
-      if (!/^\d\d\d$/.test(response.status)) return false;
-      const code = Number(response.status);
-      return code >= 200 && code < 300;
-    });
-    if (range) return range;
+    // A documented "default" response covers every undocumented status code.
+    const documentedDefault = responses.find((response) => response.status === 'default');
+    if (documentedDefault) return documentedDefault;
   }
 
   const success = responses
@@ -46,7 +43,17 @@ export function generatePayload(spec: ApiSpec, operation: Operation, options: Ge
 
   const documented = selectResponse(operation, options.status);
 
-  if (options.status !== undefined && (!documented || Number(documented.status) !== options.status)) {
+  // An operation-level "x-mock.status" is part of the spec and wins over the
+  // ad-hoc "?x-mock-status=" query parameter.
+  const overrideStatus =
+    override && typeof override['status'] === 'number' ? override['status'] : undefined;
+
+  const coversRequestedStatus =
+    options.status !== undefined &&
+    documented !== undefined &&
+    (documented.status === String(options.status) || documented.status === 'default');
+
+  if (options.status !== undefined && overrideStatus === undefined && !coversRequestedStatus) {
     const synthetic = synthesizeErrorPayload(spec, options.status);
     if (override && override['body'] !== undefined) {
       synthetic.body = `${JSON.stringify(override['body'], null, 2)}\n`;
@@ -55,7 +62,7 @@ export function generatePayload(spec: ApiSpec, operation: Operation, options: Ge
   }
 
   const response = documented;
-  const status = override && typeof override['status'] === 'number' ? override['status'] : Number(response?.status ?? 200);
+  const status = overrideStatus ?? (coversRequestedStatus ? (options.status as number) : Number(response?.status ?? 200));
 
   const headers: Record<string, string> = {};
   if (response) {

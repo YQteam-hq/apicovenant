@@ -36,6 +36,14 @@ export function parseSeverity(value: string | undefined, fallback: Severity): Se
   throw new UsageError(`invalid severity "${value}" (expected error, warn or info)`);
 }
 
+export function parseFailOn<T extends string>(value: string | undefined, allowed: readonly T[]): T | undefined {
+  if (!value) return undefined;
+  if (!allowed.includes(value as T)) {
+    throw new UsageError(`invalid fail-on "${value}" (expected ${allowed.join(' or ')})`);
+  }
+  return value as T;
+}
+
 export function parseInteger(value: string | undefined, fallback: number, label: string): number {
   if (value === undefined) return fallback;
   const parsed = Number.parseInt(value, 10);

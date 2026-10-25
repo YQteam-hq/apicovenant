@@ -102,6 +102,30 @@ test('lint reports a missing document', async () => {
   assert.match(result.stderr, /ENOENT|no such file/i);
 });
 
+test('lint rejects an invalid --fail-on value with a usage error', async () => {
+  const result = await runCli(['lint', legacySpec, '--fail-on', 'typo']);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /invalid fail-on "typo"/);
+});
+
+test('diff rejects a --fail-on value that belongs to lint', async () => {
+  const result = await runCli([
+    'diff',
+    '--golden',
+    path.join(root, 'examples', 'traffic.golden.json'),
+    '--fail-on',
+    'error',
+  ]);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /invalid fail-on "error" \(expected changed or never\)/);
+});
+
+test('an option that belongs to another command is rejected', async () => {
+  const result = await runCli(['lint', shopSpec, '--port', '3000']);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /option --port is not valid for the "lint" command/);
+});
+
 test('the rules command lists the catalogue', async () => {
   const result = await runCli(['rules']);
   assert.equal(result.code, 0);

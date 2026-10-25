@@ -43,7 +43,7 @@ Existing tools cover one of these each: schema linters check that the document i
 
 | Command | Purpose |
 | --- | --- |
-| `apicovenant lint` | Check **42 design-convention rules** that pure schema validators never look at |
+| `apicovenant lint` | Check **43 design-convention rules** that pure schema validators never look at |
 | `apicovenant mock` | Serve a mock API generated from the spec, with realistic deterministic payloads |
 | `apicovenant record` | Put a recording proxy in front of your API and capture traffic as a **golden file** |
 | `apicovenant diff` | Replay the golden file against a live API and report **behaviour drift**, field by field |
@@ -123,7 +123,7 @@ actionable — and the same addressing scheme is used by the diff engine.
 
 ### The rules
 
-42 rules across 8 categories. The full reference lives in [`docs/rules.md`](docs/rules.md).
+43 rules across 8 categories. The full reference lives in [`docs/rules.md`](docs/rules.md).
 
 | Category | Rules | What it protects |
 | --- | --- | --- |

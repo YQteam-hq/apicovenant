@@ -151,6 +151,24 @@ test('lint_openapi reports the findings of a broken document', async () => {
   assert.match(result['content'][0].text, /operation-id-required/);
 });
 
+test('lint_openapi rejects a severity outside the enum with a tool error', async () => {
+  const response = await driveOne(
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'lint_openapi',
+        arguments: { path: 'examples/legacy.openapi.yaml', severity: 'bogus' },
+      },
+    },
+  );
+
+  const result = response.result as Record<string, any>;
+  assert.equal(result['isError'], true);
+  assert.match(result['content'][0].text, /Invalid severity "bogus"/);
+});
+
 test('lint_openapi accepts a clean document and an unknown rule', async () => {
   const responses = await drive([
     {

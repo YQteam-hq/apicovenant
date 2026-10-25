@@ -59,9 +59,12 @@ export function lint(spec: ApiSpec, options: LintOptions = {}): LintResult {
   }
 
   const minSeverity = options.minSeverity;
-  const filtered = minSeverity
-    ? findings.filter((finding) => SEVERITY_ORDER[finding.severity] <= SEVERITY_ORDER[minSeverity])
-    : findings;
+  // Guard against an invalid minSeverity: "x <= undefined" is always false,
+  // which would silently suppress every finding.
+  const filtered =
+    minSeverity && minSeverity in SEVERITY_ORDER
+      ? findings.filter((finding) => SEVERITY_ORDER[finding.severity] <= SEVERITY_ORDER[minSeverity])
+      : findings;
 
   filtered.sort((a, b) => {
     const bySeverity = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];

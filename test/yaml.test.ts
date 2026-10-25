@@ -109,3 +109,61 @@ test('findKeySeparator ignores colons inside quotes and flow collections', () =>
   assert.equal(findKeySeparator('a: [1, 2]'), 1);
   assert.equal(findKeySeparator('plain'), -1);
 });
+
+test('resolves aliases inside flow collections', () => {
+  assert.deepEqual(parseYaml('a: &x 1\nb: [*x, 2]\n'), { a: 1, b: [1, 2] });
+  assert.deepEqual(parseYaml('a: &x 1\nb: {k: *x, j: 2}\n'), { a: 1, b: { k: 1, j: 2 } });
+  assert.deepEqual(parseYaml('a: &x\n  k: 1\nb: [*x, *x]\n'), { a: { k: 1 }, b: [{ k: 1 }, { k: 1 }] });
+});
+
+test('merges a flow sequence of anchors with the merge key', () => {
+  const doc = parseYaml('b1: &x\n  k: 1\nb2: &y\n  j: 2\nc:\n  <<: [*x, *y]\n  m: 3\n') as Record<string, unknown>;
+  assert.deepEqual(doc['c'], { m: 3, k: 1, j: 2 });
+});
+
+test('throws on an unknown alias inside a flow collection', () => {
+  assert.throws(() => parseYaml('a: [*nope]\n'), (error: unknown) => error instanceof YamlError);
+});
+
+test('parses a compact nested sequence', () => {
+  assert.deepEqual(parseYaml('a:\n  - - 1\n    - 2\n'), { a: [[1, 2]] });
+  assert.deepEqual(parseYaml('a:\n  - - k: 1\n'), { a: [[{ k: 1 }]] });
+});
+
+test('parses block scalars as sequence items', () => {
+  assert.deepEqual(parseYaml('a:\n  - |\n    x\n    y\n'), { a: ['x\ny\n'] });
+  assert.deepEqual(parseYaml('a:\n  - >\n    x\n    y\n'), { a: ['x y\n'] });
+  assert.deepEqual(parseYaml('a:\n  - |\n    x\n  - plain\n'), { a: ['x\n', 'plain'] });
+});
+
+test('parses a realistic enum of multi-line block scalars', () => {
+  const doc = parseYaml(
+    [
+      'components:',
+      '  schemas:',
+      '    Choice:',
+      '      type: string',
+      '      enum:',
+      '        - |',
+      '          first choice',
+      '        - second',
+      '',
+    ].join('\n'),
+  ) as { components: { schemas: { Choice: { enum: string[] } } } };
+  assert.deepEqual(doc.components.schemas.Choice.enum, ['first choice\n', 'second']);
+});
+
+test('keep chomping preserves trailing empty lines', () => {
+  assert.deepEqual(parseYaml('a: |+\n  l1\n\n'), { a: 'l1\n\n' });
+  assert.deepEqual(parseYaml('a: |+\n  l1\n'), { a: 'l1\n' });
+  assert.deepEqual(parseYaml('a: >+\n  l1\n\n'), { a: 'l1\n\n' });
+  assert.deepEqual(parseYaml('a: |-\n  l1\n\n'), { a: 'l1' });
+  assert.deepEqual(parseYaml('a: |\n  l1\n\n'), { a: 'l1\n' });
+});
+
+test('a less-indented line ends the block scalar instead of being swallowed', () => {
+  assert.throws(
+    () => parseYaml('a: |\n    deep\n  shallow\nb: 2\n'),
+    (error: unknown) => error instanceof YamlError && error.line === 3,
+  );
+});

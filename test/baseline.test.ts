@@ -96,3 +96,8 @@ test('a malformed baseline file is rejected', () => {
   assert.throws(() => parseBaseline(JSON.stringify({ apicovenant: 99, findings: [] }), 'b.json'), /unsupported baseline format/);
   assert.throws(() => parseBaseline(JSON.stringify({ apicovenant: 1 }), 'b.json'), /"findings" array/);
 });
+
+test('a baseline reports which finding entry is malformed', () => {
+  const text = JSON.stringify({ apicovenant: BASELINE_FORMAT_VERSION, findings: [null] });
+  assert.throws(() => parseBaseline(text, 'b.json'), /findings\[0\] must be an object/);
+});

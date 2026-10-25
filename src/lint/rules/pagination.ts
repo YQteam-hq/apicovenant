@@ -98,7 +98,7 @@ export const paginationEnvelope: RuleDefinition = {
 
       const properties = isPlainObject(schema['properties']) ? schema['properties'] : {};
       const names = Object.keys(properties);
-      if (names.length === 0) return;
+      if (names.length === 0) continue;
 
       const arrayProperty = names.find((name) => {
         const child = followRef(spec.raw, properties[name]);

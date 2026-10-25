@@ -134,8 +134,10 @@ function buildParameters(raw: unknown, doc: unknown, pointer: string): Parameter
   toArray(raw).forEach((entry, index) => {
     const record = asRecord(entry);
     const resolved = asRecord(followRef(doc, record));
+    // A parameter without a "name" is invalid OpenAPI, but it is kept in the
+    // model (with an empty name) so the rules can see and report it instead
+    // of silently dropping it.
     const name = typeof resolved['name'] === 'string' ? resolved['name'] : '';
-    if (!name) return;
     out.push({
       name,
       in: typeof resolved['in'] === 'string' ? resolved['in'] : 'query',

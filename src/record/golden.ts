@@ -40,9 +40,11 @@ export function createGoldenFile(target: string, spec?: string): GoldenFile {
 }
 
 export function parseGoldenFile(text: string): GoldenFile {
+  // Some editors write a UTF-8 BOM; JSON.parse rejects it.
+  const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(source);
   } catch (error) {
     throw new Error(`golden file is not valid JSON: ${(error as Error).message}`);
   }
@@ -66,17 +68,22 @@ export function parseGoldenFile(text: string): GoldenFile {
     recordedAt: typeof file.recordedAt === 'string' ? file.recordedAt : new Date().toISOString(),
     target: typeof file.target === 'string' ? file.target : '',
     spec: typeof file.spec === 'string' ? file.spec : undefined,
-    interactions: file.interactions.map((entry) => ({
-      method: String(entry.method ?? 'GET').toUpperCase(),
-      path: String(entry.path ?? '/'),
-      query: entry.query ?? {},
-      requestHeaders: entry.requestHeaders ?? {},
-      status: Number(entry.status ?? 0),
-      responseHeaders: entry.responseHeaders ?? {},
-      body: typeof entry.body === 'string' ? entry.body : '',
-      bodyType: entry.bodyType ?? 'text',
-      durationMs: Number(entry.durationMs ?? 0),
-    })),
+    interactions: file.interactions.map((entry, index) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        throw new Error(`golden file: interactions[${index}] must be an object`);
+      }
+      return {
+        method: String(entry.method ?? 'GET').toUpperCase(),
+        path: String(entry.path ?? '/'),
+        query: entry.query ?? {},
+        requestHeaders: entry.requestHeaders ?? {},
+        status: Number(entry.status ?? 0),
+        responseHeaders: entry.responseHeaders ?? {},
+        body: typeof entry.body === 'string' ? entry.body : '',
+        bodyType: entry.bodyType ?? 'text',
+        durationMs: Number(entry.durationMs ?? 0),
+      };
+    }),
   };
 }
 

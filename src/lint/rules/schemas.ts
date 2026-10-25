@@ -149,8 +149,13 @@ export const componentUnused: RuleDefinition = {
       for (const name of Object.keys(entries)) {
         const ownPath = `/components/${group}/${name}`;
         const ref = `#/components/${group}/${name}`;
+        // A reference "inside" the component must match the whole path
+        // segment: "/components/schemas/UserProfile" starts with
+        // "/components/schemas/User" as a raw string but is a different
+        // component.
+        const isInsideOwnSubtree = (p: string): boolean => p === ownPath || p.startsWith(`${ownPath}/`);
         const usedElsewhere = locations.some(
-          (location) => location.ref === ref && !location.path.startsWith(ownPath),
+          (location) => location.ref === ref && !isInsideOwnSubtree(location.path),
         );
         const usedBySecurity = group === 'securitySchemes' && securityNames.has(name);
         if (usedElsewhere || usedBySecurity) continue;
