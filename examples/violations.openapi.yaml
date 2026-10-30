@@ -1,0 +1,254 @@
+openapi: 3.2.0
+info:
+  title: Violations Fixture
+  version: 0.0.1
+  description: |
+    A fixture that breaks every convention apicovenant checks. It exists so the
+    test suite can prove that each rule still fires. It is not a realistic API.
+tags:
+  - name: declared
+    description: A tag that is declared globally.
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      summary: List widgets
+      description: Lists widgets.
+      tags:
+        - declared
+      parameters:
+        - name: page
+          in: query
+          description: Page number.
+          schema:
+            type: integer
+        - name: page
+          in: query
+          description: The same parameter declared twice.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: A page of widgets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WidgetPage'
+    post:
+      operationId: listWidgets
+      summary: Create a widget
+      description: Reuses an operationId and an undeclared tag.
+      tags:
+        - declared
+        - undeclared
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Widget'
+      responses:
+        '201':
+          description: The created widget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /gadgets:
+    get:
+      operationId: listGadgets
+      summary: List gadgets
+      description: Uses cursor pagination while the rest of the API uses page numbers.
+      tags:
+        - declared
+      parameters:
+        - name: cursor
+          in: query
+          description: Cursor.
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: The same cursor declared twice.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of gadgets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Widget'
+  /orphan/{missing}:
+    get:
+      operationId: getOrphan
+      summary: Get an orphan
+      description: The template uses a parameter that is never declared.
+      tags:
+        - declared
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /legacy/:
+    get:
+      operationId: getLegacy
+      summary: Get the legacy resource
+      description: The path ends with a slash.
+      tags:
+        - declared
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /unsafe:
+    get:
+      operationId: getUnsafe
+      summary: Unsafe request
+      description: A GET with a request body.
+      tags:
+        - declared
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /nameless:
+    get:
+      operationId: getNameless
+      summary: Nameless parameter
+      description: A parameter that forgot its name.
+      tags:
+        - declared
+      parameters:
+        - in: query
+          description: A parameter without a name.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /silent:
+    get:
+      operationId: getSilent
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /broken:
+    get:
+      operationId: getBroken
+      summary: Broken responses
+      description: The error response has no description and no content.
+      tags:
+        - declared
+      responses:
+        '400': {}
+        'default':
+          description: Fallback.
+  /fallback:
+    get:
+      operationId: getFallback
+      summary: Fallback only
+      description: Documents nothing but the catch-all response.
+      tags:
+        - declared
+      responses:
+        'default':
+          description: Fallback.
+  /wildcard:
+    get:
+      operationId: getWildcard
+      summary: Wildcard media type
+      description: Declares a wildcard content type.
+      tags:
+        - declared
+      responses:
+        '200':
+          description: ok
+          content:
+            '*/*':
+              schema:
+                type: string
+  /secured:
+    get:
+      operationId: getSecured
+      summary: Secured
+      description: References a scheme that does not exist and an undeclared scope.
+      tags:
+        - declared
+      security:
+        - missingScheme: []
+        - oauth: [read, write]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes:
+            read: Read widgets.
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          example: wid_1
+        name:
+          type: string
+          example: Widget
+        createdAt:
+          type: string
+          format: date-time
+          example: '2024-01-15T09:30:00Z'
+        internal_note:
+          type: string
+          example: snake_case outlier
+    WidgetPage:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Widget'
+    Basket:
+      type: object
+      properties:
+        rows:
+          type: array

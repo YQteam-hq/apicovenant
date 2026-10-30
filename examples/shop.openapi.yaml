@@ -1,0 +1,770 @@
+openapi: 3.1.0
+info:
+  title: Shop API
+  version: 1.4.0
+  description: |
+    The Shop API exposes the product catalogue, customer accounts and orders of the
+    demo shop.
+
+    It is the reference contract used by the apicovenant test suite and is meant to
+    pass `apicovenant lint` without a single finding.
+  contact:
+    name: Shop Platform Team
+    url: https://example.com/support
+    email: api@example.com
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://api.shop.example.com/v1
+    description: Production
+  - url: https://api.staging.shop.example.com/v1
+    description: Staging
+tags:
+  - name: users
+    description: Customer accounts and profiles.
+  - name: orders
+    description: Order placement and order history.
+  - name: products
+    description: The product catalogue.
+  - name: health
+    description: Service health probes.
+security:
+  - bearerAuth: []
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List users
+      description: Returns a page of user accounts ordered by creation time.
+      tags:
+        - users
+      parameters:
+        - name: page
+          in: query
+          description: One based page number.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            example: 1
+        - name: pageSize
+          in: query
+          description: Number of users returned per page.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+      responses:
+        '200':
+          description: A page of user accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+              example:
+                items:
+                  - id: usr_1001
+                    email: ada@example.com
+                    displayName: Ada Lovelace
+                    createdAt: '2024-01-15T09:30:00Z'
+                total: 1
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+        '403':
+          description: The caller is not allowed to list users.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: forbidden
+                message: The token does not grant the users:read scope.
+    post:
+      operationId: createUser
+      summary: Create a user
+      description: Creates a user account. The account is inactive until it is confirmed.
+      tags:
+        - users
+      requestBody:
+        required: true
+        description: The user to create.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+            example:
+              email: grace@example.com
+              displayName: Grace Hopper
+      responses:
+        '201':
+          description: The user was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              example:
+                id: usr_1002
+                email: grace@example.com
+                displayName: Grace Hopper
+                createdAt: '2024-02-01T12:00:00Z'
+        '400':
+          description: The payload was rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: invalid_request
+                message: The email address is already in use.
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+  /users/{userId}:
+    get:
+      operationId: getUser
+      summary: Get a user
+      description: Returns a single user account by id.
+      tags:
+        - users
+      parameters:
+        - name: userId
+          in: path
+          description: Identifier of the user.
+          required: true
+          schema:
+            type: string
+            example: usr_1001
+      responses:
+        '200':
+          description: The requested user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              example:
+                id: usr_1001
+                email: ada@example.com
+                displayName: Ada Lovelace
+                createdAt: '2024-01-15T09:30:00Z'
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+        '404':
+          description: No user with that id exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: not_found
+                message: No user with id usr_1001.
+    patch:
+      operationId: updateUser
+      summary: Update a user
+      description: Updates the mutable fields of a user account.
+      tags:
+        - users
+      parameters:
+        - name: userId
+          in: path
+          description: Identifier of the user.
+          required: true
+          schema:
+            type: string
+            example: usr_1001
+      requestBody:
+        required: true
+        description: The fields to change.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+            example:
+              email: ada@example.com
+              displayName: Ada Byron
+      responses:
+        '200':
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              example:
+                id: usr_1001
+                email: ada@example.com
+                displayName: Ada Byron
+                createdAt: '2024-01-15T09:30:00Z'
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+        '404':
+          description: No user with that id exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: not_found
+                message: No user with id usr_1001.
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      description: Returns a page of orders placed by the caller.
+      tags:
+        - orders
+      parameters:
+        - name: page
+          in: query
+          description: One based page number.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            example: 1
+        - name: pageSize
+          in: query
+          description: Number of orders returned per page.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+      responses:
+        '200':
+          description: A page of orders.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderPage'
+              example:
+                items:
+                  - id: ord_2001
+                    status: paid
+                    total: 42.5
+                    createdAt: '2024-03-02T08:15:00Z'
+                total: 1
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+    post:
+      operationId: createOrder
+      summary: Create an order
+      description: Places an order for one or more products.
+      tags:
+        - orders
+      requestBody:
+        required: true
+        description: The order to place.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreate'
+            example:
+              userId: usr_1001
+              items:
+                - productId: prd_3001
+                  quantity: 2
+      responses:
+        '201':
+          description: The order was placed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              example:
+                id: ord_2001
+                status: paid
+                total: 42.5
+                createdAt: '2024-03-02T08:15:00Z'
+        '400':
+          description: The payload was rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: invalid_request
+                message: The order contains no items.
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Get an order
+      description: Returns a single order by id.
+      tags:
+        - orders
+      parameters:
+        - name: orderId
+          in: path
+          description: Identifier of the order.
+          required: true
+          schema:
+            type: string
+            example: ord_2001
+      responses:
+        '200':
+          description: The requested order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              example:
+                id: ord_2001
+                status: paid
+                total: 42.5
+                createdAt: '2024-03-02T08:15:00Z'
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+        '404':
+          description: No order with that id exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: not_found
+                message: No order with id ord_2001.
+  /products:
+    get:
+      operationId: listProducts
+      summary: List products
+      description: Returns a page of catalogue products.
+      tags:
+        - products
+      parameters:
+        - name: page
+          in: query
+          description: One based page number.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            example: 1
+        - name: pageSize
+          in: query
+          description: Number of products returned per page.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+      responses:
+        '200':
+          description: A page of products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+              example:
+                items:
+                  - id: prd_3001
+                    name: Blue mug
+                    price: 12.5
+                    inStock: true
+                total: 1
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+  /products/{productId}:
+    get:
+      operationId: getProduct
+      summary: Get a product
+      description: Returns a single catalogue product.
+      tags:
+        - products
+      parameters:
+        - name: productId
+          in: path
+          description: Identifier of the product.
+          required: true
+          schema:
+            type: string
+            example: prd_3001
+      responses:
+        '200':
+          description: The requested product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+              example:
+                id: prd_3001
+                name: Blue mug
+                price: 12.5
+                inStock: true
+        '401':
+          description: The request was not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: unauthorized
+                message: A valid bearer token is required.
+        '404':
+          description: No product with that id exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: not_found
+                message: No product with id prd_3001.
+  /health:
+    get:
+      operationId: getHealth
+      summary: Get service health
+      description: Reports whether the service is ready to accept traffic.
+      tags:
+        - health
+      x-public: true
+      security: []
+      responses:
+        '200':
+          description: The current service health.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: ok
+                uptimeSeconds: 90210
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A JWT issued by the identity service.
+  schemas:
+    Error:
+      type: object
+      description: The error envelope returned for every failed request.
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine readable error code.
+          example: not_found
+        message:
+          type: string
+          description: Human readable explanation.
+          example: No user with id usr_1001.
+        details:
+          type: object
+          description: Optional additional context.
+          additionalProperties: true
+          example:
+            field: email
+      example:
+        code: not_found
+        message: No user with id usr_1001.
+    User:
+      type: object
+      description: A customer account.
+      required:
+        - id
+        - email
+        - displayName
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Stable identifier of the user.
+          example: usr_1001
+        email:
+          type: string
+          format: email
+          description: Contact address of the user.
+          example: ada@example.com
+        displayName:
+          type: string
+          description: Name shown in the interface.
+          example: Ada Lovelace
+        createdAt:
+          type: string
+          format: date-time
+          description: When the account was created.
+          example: '2024-01-15T09:30:00Z'
+      example:
+        id: usr_1001
+        email: ada@example.com
+        displayName: Ada Lovelace
+        createdAt: '2024-01-15T09:30:00Z'
+    UserCreate:
+      type: object
+      description: The fields required to create a user.
+      required:
+        - email
+        - displayName
+      properties:
+        email:
+          type: string
+          format: email
+          description: Contact address of the user.
+          example: grace@example.com
+        displayName:
+          type: string
+          description: Name shown in the interface.
+          example: Grace Hopper
+      example:
+        email: grace@example.com
+        displayName: Grace Hopper
+    UserPage:
+      type: object
+      description: A page of users.
+      required:
+        - items
+        - total
+      properties:
+        items:
+          type: array
+          description: The users on this page.
+          items:
+            $ref: '#/components/schemas/User'
+        total:
+          type: integer
+          description: Total number of users matching the query.
+          example: 1
+      example:
+        items:
+          - id: usr_1001
+            email: ada@example.com
+            displayName: Ada Lovelace
+            createdAt: '2024-01-15T09:30:00Z'
+        total: 1
+    Order:
+      type: object
+      description: A placed order.
+      required:
+        - id
+        - status
+        - total
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Stable identifier of the order.
+          example: ord_2001
+        status:
+          type: string
+          description: Current fulfilment state.
+          enum:
+            - pending
+            - paid
+            - shipped
+            - cancelled
+          example: paid
+        total:
+          type: number
+          format: double
+          description: Order total including tax.
+          example: 42.5
+        createdAt:
+          type: string
+          format: date-time
+          description: When the order was placed.
+          example: '2024-03-02T08:15:00Z'
+      example:
+        id: ord_2001
+        status: paid
+        total: 42.5
+        createdAt: '2024-03-02T08:15:00Z'
+    OrderCreate:
+      type: object
+      description: The fields required to place an order.
+      required:
+        - userId
+        - items
+      properties:
+        userId:
+          type: string
+          description: The customer placing the order.
+          example: usr_1001
+        items:
+          type: array
+          description: The ordered products.
+          minItems: 1
+          items:
+            type: object
+            required:
+              - productId
+              - quantity
+            properties:
+              productId:
+                type: string
+                description: The ordered product.
+                example: prd_3001
+              quantity:
+                type: integer
+                description: How many units were ordered.
+                minimum: 1
+                example: 2
+      example:
+        userId: usr_1001
+        items:
+          - productId: prd_3001
+            quantity: 2
+    OrderPage:
+      type: object
+      description: A page of orders.
+      required:
+        - items
+        - total
+      properties:
+        items:
+          type: array
+          description: The orders on this page.
+          items:
+            $ref: '#/components/schemas/Order'
+        total:
+          type: integer
+          description: Total number of orders matching the query.
+          example: 1
+      example:
+        items:
+          - id: ord_2001
+            status: paid
+            total: 42.5
+            createdAt: '2024-03-02T08:15:00Z'
+        total: 1
+    Product:
+      type: object
+      description: A catalogue product.
+      required:
+        - id
+        - name
+        - price
+      properties:
+        id:
+          type: string
+          description: Stable identifier of the product.
+          example: prd_3001
+        name:
+          type: string
+          description: Display name of the product.
+          example: Blue mug
+        price:
+          type: number
+          format: double
+          description: Price in the shop currency.
+          example: 12.5
+        inStock:
+          type: boolean
+          description: Whether the product can be ordered right now.
+          example: true
+      example:
+        id: prd_3001
+        name: Blue mug
+        price: 12.5
+        inStock: true
+    ProductPage:
+      type: object
+      description: A page of products.
+      required:
+        - items
+        - total
+      properties:
+        items:
+          type: array
+          description: The products on this page.
+          items:
+            $ref: '#/components/schemas/Product'
+        total:
+          type: integer
+          description: Total number of products matching the query.
+          example: 1
+      example:
+        items:
+          - id: prd_3001
+            name: Blue mug
+            price: 12.5
+            inStock: true
+        total: 1
+    HealthStatus:
+      type: object
+      description: The health of the service.
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          description: Overall health of the service.
+          enum:
+            - ok
+            - degraded
+            - down
+          example: ok
+        uptimeSeconds:
+          type: integer
+          description: How long the service has been running.
+          example: 90210
+      example:
+        status: ok
+        uptimeSeconds: 90210

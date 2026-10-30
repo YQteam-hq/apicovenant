@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="apicovenant">
+  <g fill="none" stroke="#18181B" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M396 118 H116 V396 H396 V268 L312 202"/>
+  </g>
+  <circle cx="312" cy="202" r="31" fill="#18181B"/>
+</svg>

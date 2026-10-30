@@ -1,0 +1,48 @@
+{
+  "apicovenant": 1,
+  "recordedAt": "2026-10-23T18:05:07.486Z",
+  "target": "http://127.0.0.1:4010",
+  "interactions": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "query": {},
+      "requestHeaders": {
+        "user-agent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; zh-CN) WindowsPowerShell/5.1.22000.282",
+        "host": "127.0.0.1:4011",
+        "connection": "Keep-Alive"
+      },
+      "status": 200,
+      "responseHeaders": {
+        "connection": "keep-alive",
+        "content-type": "application/json",
+        "date": "Fri, 23 Oct 2026 18:05:09 GMT",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "{\n  \"items\": [\n    {\n      \"id\": \"usr_1001\",\n      \"email\": \"ada@example.com\",\n      \"displayName\": \"Ada Lovelace\",\n      \"createdAt\": \"2024-01-15T09:30:00Z\"\n    }\n  ],\n  \"total\": 1\n}\n",
+      "bodyType": "json",
+      "durationMs": 30
+    },
+    {
+      "method": "GET",
+      "path": "/users/usr_1001",
+      "query": {},
+      "requestHeaders": {
+        "user-agent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; zh-CN) WindowsPowerShell/5.1.22000.282",
+        "host": "127.0.0.1:4011"
+      },
+      "status": 200,
+      "responseHeaders": {
+        "connection": "keep-alive",
+        "content-type": "application/json",
+        "date": "Fri, 23 Oct 2026 18:05:09 GMT",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "{\n  \"id\": \"usr_1001\",\n  \"email\": \"ada@example.com\",\n  \"displayName\": \"Ada Lovelace\",\n  \"createdAt\": \"2024-01-15T09:30:00Z\"\n}\n",
+      "bodyType": "json",
+      "durationMs": 3
+    }
+  ]
+}
