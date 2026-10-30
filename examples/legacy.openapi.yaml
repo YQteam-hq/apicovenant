@@ -1,0 +1,154 @@
+openapi: 3.1.0
+info:
+  title: Legacy Inventory API
+  version: 0.9
+  description: |
+    A deliberately inconsistent contract used by the apicovenant test suite.
+
+    Every section below violates at least one convention so the linter has
+    something to report. Do not copy this file as a starting point.
+servers:
+  - url: http://legacy.internal.example.com/api
+    description: Plain HTTP on purpose.
+tags:
+  - name: inventory
+    description: Warehouse inventory.
+paths:
+  /create_stock_item:
+    get:
+      summary: Fetch a stock item
+      description: Fetches a stock item.
+      responses:
+        '200':
+          description: The stock item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/stockItem'
+  /stock_items:
+    get:
+      operationId: getStockItems
+      summary: Fetch stock items
+      description: Fetches the list of stock items.
+      tags:
+        - inventory
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The stock items.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/stockItem'
+        '20O':
+          description: Typo status code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/stockItem'
+        '500':
+          description: Something went wrong.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+    post:
+      operationId: addStockItem
+      summary: Add a stock item
+      description: Adds a stock item.
+      tags:
+        - inventory
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/stockItem'
+      responses:
+        '201':
+          description: The item was added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/stockItem'
+  /stock_items/{stock_item_id}:
+    get:
+      operationId: getStockItem
+      summary: Fetch a stock item
+      description: Fetches one stock item.
+      tags:
+        - inventory
+      parameters:
+        - name: stock_item_id
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The stock item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/stockItem'
+    delete:
+      operationId: deleteStockItem
+      summary: Delete a stock item
+      description: Deletes a stock item.
+      tags:
+        - inventory
+      deprecated: true
+      parameters:
+        - name: stock_item_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Gone.
+components:
+  securitySchemes:
+    legacyApiKey:
+      type: apiKey
+      in: query
+      name: api_key
+  schemas:
+    stockItem:
+      type: object
+      required:
+        - id
+        - name
+        - missing_property
+      properties:
+        id:
+          type: string
+          example: stk_1
+        name:
+          type: string
+          example: Widget
+        quantity:
+          type: integer
+          nullable: true
+          example: 3
+        tags:
+          type: array
+          items:
+            type: string
