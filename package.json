@@ -1,0 +1,75 @@
+{
+  "name": "apicovenant",
+  "version": "1.0.3",
+  "description": "Zero-dependency OpenAPI contract guardian: lint design conventions, mock from spec, record real traffic, and diff behavior across releases.",
+  "keywords": [
+    "openapi",
+    "swagger",
+    "api-contract",
+    "linter",
+    "mock-server",
+    "contract-testing",
+    "regression",
+    "cli",
+    "zero-dependency"
+  ],
+  "license": "Apache-2.0",
+  "author": {
+    "name": "YQteam",
+    "email": "yqteam@yeah.net",
+    "url": "https://yq-tuandui.xyz"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "apicovenant": "bin/apicovenant.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "docs",
+    "assets",
+    "scripts",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "NOTICE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "start": "node bin/apicovenant.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "prepare": "npm run build",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "coverage": "node --test --experimental-test-coverage",
+    "typecheck": "tsc --noEmit",
+    "release-check": "node scripts/release-check.mjs",
+    "lint:self": "node bin/apicovenant.mjs lint examples/shop.openapi.yaml --format text"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/node": "^22.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YQteam-hq/apicovenant.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YQteam-hq/apicovenant/issues"
+  },
+  "homepage": "https://github.com/YQteam-hq/apicovenant#readme"
+}
