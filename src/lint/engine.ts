@@ -52,9 +52,13 @@ export function lint(spec: ApiSpec, options: LintOptions = {}): LintResult {
       findings.push({
         ruleId: rule.id,
         severity: 'error',
-        message: `rule failed to run: ${(error as Error).message}`,
+        message: 'rule failed to run: internal error',
         path: '',
       });
+      // Log detailed error for debugging (only in development)
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`Rule ${rule.id} failed:`, error);
+      }
     }
   }
 
