@@ -74,16 +74,20 @@ export function matchRoute(routes: CompiledRoute[], method: string, pathname: st
   }
 
   if (pathMatched) {
-
-    for (const route of routes) {
-      if (!route.regex.test(pathname)) continue;
+    // Find routes that match the path but not the HTTP method
+    const pathMatchedRoutes = routes.filter(route => route.regex.test(pathname));
+    const allowedMethods = [...new Set(pathMatchedRoutes.map(r => r.operation.method.toUpperCase()))].sort();
+    
+    // Return the first matched route with method-not-allowed flag
+    if (pathMatchedRoutes.length > 0) {
       return {
         operation: {
-          ...route.operation,
-          method: route.operation.method,
-          raw: { ...route.operation.raw, 'x-method-not-allowed': true },
+          ...pathMatchedRoutes[0].operation,
+          method: pathMatchedRoutes[0].operation.method,
+          raw: { ...pathMatchedRoutes[0].operation.raw, 'x-method-not-allowed': true },
         },
         pathParams: {},
+        allowedMethods,
       };
     }
   }
@@ -93,6 +97,12 @@ export function matchRoute(routes: CompiledRoute[], method: string, pathname: st
 
 export async function startMockServer(spec: ApiSpec, options: MockServerOptions = {}): Promise<MockServerHandle> {
   const host = options.host ?? '127.0.0.1';
+  
+  // Add validation to prevent binding to non-local addresses
+  if (host !== '127.0.0.1' && host !== 'localhost') {
+    throw new Error('Mock server can only bind to localhost (127.0.0.1 or localhost)');
+  }
+  
   const port = options.port ?? 0;
 
   const routes: CompiledRoute[] = [];

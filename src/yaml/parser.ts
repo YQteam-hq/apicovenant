@@ -30,6 +30,17 @@ const FALSE_VALUES = new Set(['false', 'False', 'FALSE']);
 const NULL_VALUES = new Set(['null', 'Null', 'NULL', '~', '']);
 
 export function parseYaml(text: string): unknown {
+  // Add resource limits to prevent DoS attacks
+  if (text.length > 10 * 1024 * 1024) { // 10MB
+    throw new YamlError('YAML document too large (max 10MB)', 1);
+  }
+  
+  // Add line count limit
+  const lines = text.split('\n');
+  if (lines.length > 10000) { // 10k lines
+    throw new YamlError('YAML document too many lines (max 10k)', 1);
+  }
+  
   return new YamlParser(text).parseDocument();
 }
 
