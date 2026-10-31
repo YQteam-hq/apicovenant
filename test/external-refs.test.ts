@@ -136,3 +136,42 @@ paths:
     },
   );
 });
+
+test('an operation defined in another file keeps its operationId', async () => {
+  await withSpecFiles(
+    {
+      'openapi.yaml': `openapi: 3.0.3
+info: { title: Operations, version: 1.0.0 }
+paths:
+  /widgets:
+    get:
+      $ref: './operations/list.yml'
+`,
+      'operations/list.yml': `operationId: listWidgets
+summary: List widgets
+responses:
+  '200':
+    description: ok
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: '../schemas/widget.yml#/Widget'
+`,
+      'schemas/widget.yml': `Widget:
+  type: object
+  required: [id]
+  properties:
+    id: { type: string }
+`,
+    },
+    async (entry) => {
+      const spec = await loadSpecFile(entry);
+      assert.equal(spec.operations.length, 1);
+      assert.equal(spec.operations[0]!.operationId, 'listWidgets');
+      assert.equal(spec.operations[0]!.summary, 'List widgets');
+      assert.ok(spec.operations[0]!.responses.get('200'));
+    },
+  );
+});
