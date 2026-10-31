@@ -317,7 +317,7 @@ export function securitySchemes(spec: ApiSpec): Record<string, Record<string, un
   const schemes = spec.components['securitySchemes'];
   const out: Record<string, Record<string, unknown>> = {};
   if (isPlainObject(schemes)) {
-    for (const [name, value] of Object.entries(schemes)) out[name] = asRecord(value);
+    for (const [name, value] of Object.entries(schemes)) out[name] = asRecord(followRef(spec.raw, value));
   }
   return out;
 }
