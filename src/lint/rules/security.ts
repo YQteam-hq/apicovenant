@@ -76,6 +76,31 @@ export const securitySchemeUndefined: RuleDefinition = {
   },
 };
 
+/**
+ * OAuth2 declares its scopes per flow, not on the scheme itself:
+ *
+ *   flows:
+ *     clientCredentials:
+ *       scopes: { read: ..., write: ... }
+ *
+ * OpenID Connect does not declare scopes at all (they come from the
+ * discovery document), so there is nothing to compare against.
+ */
+function declaredScopes(scheme: Record<string, unknown>): string[] | undefined {
+  if (scheme['type'] !== 'oauth2') return undefined;
+
+  const flows = isPlainObject(scheme['flows']) ? scheme['flows'] : {};
+  const scopes = new Set<string>();
+  for (const flow of Object.values(flows)) {
+    if (!isPlainObject(flow)) continue;
+    const declared = flow['scopes'];
+    if (isPlainObject(declared)) {
+      for (const name of Object.keys(declared)) scopes.add(name);
+    }
+  }
+  return [...scopes];
+}
+
 export const securityScopesDeclared: RuleDefinition = {
   id: 'security-scopes-declared',
   title: 'OAuth scopes are declared',
@@ -93,10 +118,10 @@ export const securityScopesDeclared: RuleDefinition = {
         for (const [name, scopes] of Object.entries(requirement)) {
           const scheme = schemes[name];
           if (!scheme) continue;
-          const type = scheme['type'];
-          if (type !== 'oauth2' && type !== 'openIdConnect') continue;
+          const declared = declaredScopes(scheme);
+          // Scope names are not part of the document for OpenID Connect.
+          if (declared === undefined) continue;
 
-          const declared = isPlainObject(scheme['scopes']) ? Object.keys(scheme['scopes']) : [];
           for (const scope of scopes) {
             if (!declared.includes(scope)) {
               report({
