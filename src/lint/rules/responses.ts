@@ -2,12 +2,14 @@ import type { RuleDefinition } from '../types.ts';
 import { isPlainObject } from '../../util/text.ts';
 import { isRefNode, refName } from '../../spec/ref.ts';
 
-const VALID_STATUS = /^(?:[1-5]\d{2}|default)$/;
+// OpenAPI allows a response class wildcard alongside exact codes:
+// "2XX" covers every status from 200 to 299. The X must be uppercase.
+const VALID_STATUS = /^(?:[1-5](?:\d{2}|XX)|default)$/;
 const BODYLESS_STATUS = new Set(['204', '205', '304', '101']);
 
 // 1xx (informational) and 3xx (redirection) responses carry no body by
 // definition — only 304 is special enough to list explicitly.
-const BODYLESS_RANGE = /^[13]\d\d$/;
+const BODYLESS_RANGE = /^[13](?:\d\d|XX)$/;
 
 function isErrorStatus(status: string): boolean {
   return status.startsWith('4') || status.startsWith('5');
@@ -24,7 +26,7 @@ export const responseSuccessRequired: RuleDefinition = {
   keywords: ['response', '2xx', 'success'],
   check({ spec, report }) {
     for (const operation of spec.operations) {
-      const hasSuccess = [...operation.responses.keys()].some((status) => /^2\d\d$/.test(status));
+      const hasSuccess = [...operation.responses.keys()].some((status) => /^2(?:\d\d|XX)$/.test(status));
       if (!hasSuccess) {
         report({
           message: `${operation.key} declares no 2xx response`,
