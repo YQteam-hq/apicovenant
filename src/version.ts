@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const FALLBACK_VERSION = '1.0.3';
+const FALLBACK_VERSION = '1.0.4';
 
 function readVersion(): string {
   try {

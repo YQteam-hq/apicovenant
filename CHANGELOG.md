@@ -11,6 +11,100 @@ says so.
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-10-31
+
+Ten fixes to the recorder, the mock server, the diff engine and the YAML
+parser, found by running the tool against real documents and real traffic.
+Every existing golden file still loads, and the rule catalogue is unchanged
+at 43 rules in 8 categories.
+
+Two additive capabilities land here rather than in a feature release:
+`diff` can now be given the credentials a recorded request needs, and
+external `$ref` files are resolved instead of ignored.
+
+Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
+
+### Fixed
+
+- **A single request can no longer kill the mock server.** The request
+  handler ran inside a floating promise, so any exception became an
+  unhandled rejection and took the process down. `?x-mock-status=` accepted
+  any value, `decodeURIComponent()` threw on malformed escapes such as `%ZZ`,
+  the URL was built from the attacker controlled `Host` header, and a
+  response key of `default` or `2XX` became `NaN`. Status overrides are
+  validated now, path segments decode defensively, the URL is parsed against
+  a fixed base, and the handler catches everything that is left.
+- **Recorded responses are streamed instead of buffered.** The proxy awaited
+  the whole body before writing a single byte, so a streaming endpoint
+  delivered nothing until the upstream closed, and an upstream that never
+  closed lost every interaction recorded so far. The body is forwarded chunk
+  by chunk while the same chunks are collected for the golden file, and a
+  client that disconnects aborts the upstream request instead of leaking.
+- **Bodies stay byte-exact.** Both directions were decoded with
+  `toString('utf8')`, so every byte that was not valid UTF-8 became U+FFFD:
+  a 16 byte PNG came back as 28 bytes of replacement characters. Bodies are
+  bytes end to end now, and the golden file stores base64 with
+  `bodyEncoding: "base64"` when the bytes do not round-trip through UTF-8.
+- **The replay sends the request body, not the response body.**
+  `diff --replay-all` used the recorded *response* as the request, so every
+  write endpoint reported drift that never existed. The recorder stores
+  `requestBody` and the replay sends exactly those bytes.
+- **Credentials can be supplied for a replayed request.** The recorder
+  redacts `Authorization` and `Cookie`, but `diff` had no way to put a real
+  credential back, so every request to an authenticated endpoint came back
+  401 and was reported as drift. `diff` accepts `-H/--header "Name: value"`
+  now, and a recorded `<redacted>` header is dropped rather than forwarded.
+- **Repeated query parameters and every `Set-Cookie` survive.** The query
+  was built with `Object.fromEntries`, which keeps only the last value of a
+  repeated key, and repeated headers were joined with `", "`, which broke
+  every cookie that contained a comma. Both are recorded in full now.
+- **OAuth scopes are read from the flows.** `security-scopes-declared`
+  looked for a `scopes` map on the security scheme, where OpenAPI never puts
+  it, so every OAuth operation was warned about even when the document
+  declared every scope it used. The scopes of every declared flow are read
+  now, and a scheme behind a `$ref` is resolved before it is inspected.
+- **`2XX` and `prefixItems` are valid OpenAPI.** The specification allows a
+  status class wildcard, so `2XX` covers 200-299; the linter called it an
+  invalid HTTP status and did not count it as a success response. An array
+  with `prefixItems` and no `items` is a complete tuple, and was rejected for
+  a missing `items`.
+- **External `$ref` files are resolved instead of ignored.** A reference
+  that did not start with `#/` silently became `undefined`, so a document
+  split across files reached every rule with unresolvable schemas. The
+  DigitalOcean OpenAPI document has 868 external references; linting it went
+  from 2426 errors to 27, with 866 operations keeping their `operationId`.
+- **Large real-world documents load.** Four gaps in the scalar scanner kept
+  documents with multi-line scalars, a blank line inside a value, a quoted
+  scalar spanning lines, or an apostrophe in a key from loading at all. The
+  same repository that exposed the `$ref` problem now parses end to end.
+
+### Added
+
+- **`diff` accepts `-H/--header "Name: value"`.** Repeatable, matched
+  case-insensitively, and it replaces the recorded value. `HttpLiveSource`
+  takes the overrides as an optional third argument, so the library API is
+  unchanged.
+- **`--output -` writes to stdout.** The value used to go straight to the
+  writer, which created a file named `-`. `lint` and `diff` treat it as
+  stdout now, including when it comes from the configuration file.
+
+### Changed
+
+- **The JSON diff report names both sides.** `golden` held the recorded
+  target URL and the path of the golden file was not in the report at all.
+  The object now carries `golden` (the path) and `target` (the recorded URL)
+  separately. No other field changed.
+- **The golden file format gained optional fields.** `bodyEncoding`,
+  `requestBody` and `requestBodyEncoding` are new and optional, and `query`
+  may now hold a list of values. A file written by an earlier version still
+  parses and round-trips.
+
+### Notes
+
+- 236 tests (234 pass, 0 fail, 2 pre-existing skips); `release-check`
+  reports 43 rules in code, 43 documented.
+- npm: `apicovenant@1.0.4` is `latest`, published with sigstore provenance.
+
 ## [1.0.3] — 2026-10-25
 
 Twenty-six correctness fixes from two audit rounds: 22 defects confirmed in a
@@ -252,6 +346,9 @@ Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
 - `typescript` is declared as `^5.8.0`: the `erasableSyntaxOnly` compiler
   option used by the project does not exist in 5.6.
 
-[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.4
+[1.0.3]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.3
+[1.0.2]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.2
 [1.0.1]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.1
 [1.0.0]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.0
