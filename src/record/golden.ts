@@ -1,5 +1,22 @@
 export const GOLDEN_FORMAT_VERSION = 1;
 
+/**
+ * Bodies are stored as UTF-8 when the bytes round-trip through UTF-8, and as
+ * base64 otherwise. Decoding a PNG with toString('utf8') replaces every
+ * invalid byte with U+FFFD, which silently destroys the payload.
+ */
+export type BodyEncoding = 'utf8' | 'base64';
+
+export function encodeBody(buffer: Buffer): { body: string; encoding: BodyEncoding } {
+  const text = buffer.toString('utf8');
+  if (Buffer.from(text, 'utf8').equals(buffer)) return { body: text, encoding: 'utf8' };
+  return { body: buffer.toString('base64'), encoding: 'base64' };
+}
+
+export function decodeBody(body: string, encoding?: BodyEncoding): Buffer {
+  return encoding === 'base64' ? Buffer.from(body, 'base64') : Buffer.from(body, 'utf8');
+}
+
 export interface GoldenInteraction {
   method: string;
 
@@ -12,10 +29,17 @@ export interface GoldenInteraction {
 
   body: string;
 
-  bodyType: 'json' | 'text' | 'empty';
+  bodyType: 'json' | 'text' | 'empty' | 'binary';
+
+  bodyEncoding?: BodyEncoding;
+
+  requestBody?: string;
+
+  requestBodyEncoding?: BodyEncoding;
 
   durationMs: number;
 }
+
 
 export interface GoldenFile {
 
@@ -81,6 +105,9 @@ export function parseGoldenFile(text: string): GoldenFile {
         responseHeaders: entry.responseHeaders ?? {},
         body: typeof entry.body === 'string' ? entry.body : '',
         bodyType: entry.bodyType ?? 'text',
+        bodyEncoding: entry.bodyEncoding === 'base64' ? 'base64' : undefined,
+        requestBody: typeof entry.requestBody === 'string' ? entry.requestBody : undefined,
+        requestBodyEncoding: entry.requestBodyEncoding === 'base64' ? 'base64' : undefined,
         durationMs: Number(entry.durationMs ?? 0),
       };
     }),

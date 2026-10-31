@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { createGoldenFile, type GoldenFile, type GoldenInteraction } from './golden.ts';
+import { createGoldenFile, encodeBody, type GoldenFile, type GoldenInteraction } from './golden.ts';
 
 export interface RecorderOptions {
 
@@ -96,7 +96,11 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       const started = Date.now();
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk as Buffer);
-      const requestBody = Buffer.concat(chunks).toString('utf8');
+      // Keep the request body as bytes. Converting to a string and back
+      // rewrites every byte that is not valid UTF-8 (0x89 becomes EF BF BD),
+      // which corrupts uploads, protobuf and multipart payloads.
+      const requestBody = Buffer.concat(chunks);
+      const encodedRequest = encodeBody(requestBody);
 
       const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
       const targetUrl = `${target}${request.url ?? '/'}`;
@@ -115,7 +119,9 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
         upstream = await fetch(targetUrl, {
           method: request.method ?? 'GET',
           headers: forwardHeaders(request.headers),
-          body: ['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase()) ? undefined : requestBody,
+          body: ['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase())
+            ? undefined
+            : new Uint8Array(requestBody),
           redirect: 'manual',
           signal: controller.signal,
         });
@@ -169,10 +175,17 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       }
       if (!response.writableEnded && !response.destroyed) response.end();
 
-      const responseBody = Buffer.concat(responseChunks).toString('utf8');
+      const encodedResponse = encodeBody(Buffer.concat(responseChunks));
+      const responseBody = encodedResponse.body;
       const contentType = responseHeaders['content-type'] ?? '';
       const bodyType: GoldenInteraction['bodyType'] =
-        responseBody.trim() === '' ? 'empty' : contentType.includes('json') ? 'json' : 'text';
+        encodedResponse.encoding === 'base64'
+          ? 'binary'
+          : responseBody.trim() === ''
+            ? 'empty'
+            : contentType.includes('json')
+              ? 'json'
+              : 'text';
 
       const interaction: GoldenInteraction = {
         method: (request.method ?? 'GET').toUpperCase(),
@@ -183,6 +196,9 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
         responseHeaders: redactHeaders(responseHeaders),
         body: responseBody,
         bodyType,
+        ...(encodedResponse.encoding === 'base64' ? { bodyEncoding: 'base64' as const } : {}),
+        requestBody: encodedRequest.body,
+        ...(encodedRequest.encoding === 'base64' ? { requestBodyEncoding: 'base64' as const } : {}),
         durationMs: Date.now() - started,
       };
 
