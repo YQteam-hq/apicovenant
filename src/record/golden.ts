@@ -17,15 +17,47 @@ export function decodeBody(body: string, encoding?: BodyEncoding): Buffer {
   return encoding === 'base64' ? Buffer.from(body, 'base64') : Buffer.from(body, 'utf8');
 }
 
+export type MultiValue = string | string[];
+
+/**
+ * A query key may appear more than once (`?tag=a&tag=b`) and a response may
+ * carry several Set-Cookie headers. Both used to be collapsed to a single
+ * value while recording, so the replay no longer looked like the original
+ * request.
+ */
+export function valuesOf(value: MultiValue | undefined): string[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+export function queryPairs(query: Record<string, MultiValue>): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const [name, value] of Object.entries(query)) {
+    for (const item of valuesOf(value)) pairs.push([name, item]);
+  }
+  return pairs;
+}
+
+function normalizeMultiValueMap(input: unknown): Record<string, MultiValue> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return {};
+  const out: Record<string, MultiValue> = {};
+  for (const [name, value] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof value === 'string') out[name] = value;
+    else if (Array.isArray(value)) out[name] = value.filter((item): item is string => typeof item === 'string');
+    else if (typeof value === 'number' || typeof value === 'boolean') out[name] = String(value);
+  }
+  return out;
+}
+
 export interface GoldenInteraction {
   method: string;
 
   path: string;
 
-  query: Record<string, string>;
+  query: Record<string, MultiValue>;
   requestHeaders: Record<string, string>;
   status: number;
-  responseHeaders: Record<string, string>;
+  responseHeaders: Record<string, MultiValue>;
 
   body: string;
 
@@ -99,10 +131,10 @@ export function parseGoldenFile(text: string): GoldenFile {
       return {
         method: String(entry.method ?? 'GET').toUpperCase(),
         path: String(entry.path ?? '/'),
-        query: entry.query ?? {},
+        query: normalizeMultiValueMap(entry.query),
         requestHeaders: entry.requestHeaders ?? {},
         status: Number(entry.status ?? 0),
-        responseHeaders: entry.responseHeaders ?? {},
+        responseHeaders: normalizeMultiValueMap(entry.responseHeaders),
         body: typeof entry.body === 'string' ? entry.body : '',
         bodyType: entry.bodyType ?? 'text',
         bodyEncoding: entry.bodyEncoding === 'base64' ? 'base64' : undefined,
@@ -118,10 +150,14 @@ export function serializeGoldenFile(file: GoldenFile): string {
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
-export function interactionKey(interaction: { method: string; path: string; query?: Record<string, string> }): string {
+export function interactionKey(interaction: {
+  method: string;
+  path: string;
+  query?: Record<string, MultiValue>;
+}): string {
   const query = Object.keys(interaction.query ?? {})
     .sort()
-    .map((key) => `${key}=${(interaction.query as Record<string, string>)[key]}`)
+    .flatMap((key) => valuesOf((interaction.query ?? {})[key]).map((value) => `${key}=${value}`))
     .join('&');
   return query ? `${interaction.method} ${interaction.path}?${query}` : `${interaction.method} ${interaction.path}`;
 }
