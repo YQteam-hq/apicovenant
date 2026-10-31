@@ -17,20 +17,41 @@ export interface GenerateOptions {
   latency?: number;
 }
 
+/**
+ * Converts a response key to a concrete status code.
+ *
+ * OpenAPI allows three shapes: an exact code ("200"), a class wildcard
+ * ("2XX") and "default". Only the first one maps to a single number;
+ * the others are resolved by the caller.
+ */
+export function numericStatus(status: string | undefined): number | undefined {
+  if (!status) return undefined;
+  return /^[1-5]\d\d$/.test(status) ? Number(status) : undefined;
+}
+
+export function matchesStatusClass(pattern: string | undefined, status: number): boolean {
+  if (!pattern) return false;
+  const match = /^([1-5])XX$/i.exec(pattern);
+  return match ? Number(match[1]) === Math.trunc(status / 100) : false;
+}
+
 export function selectResponse(operation: Operation, requestedStatus?: number): Response | undefined {
   const responses = [...operation.responses.values()];
 
   if (requestedStatus !== undefined) {
-    const exact = responses.find((response) => response.status === String(requestedStatus));
+    const exact = responses.find((response) => numericStatus(response.status) === requestedStatus);
     if (exact) return exact;
+    // "2XX" is more specific than "default", so it wins when both exist.
+    const wildcard = responses.find((response) => matchesStatusClass(response.status, requestedStatus));
+    if (wildcard) return wildcard;
     // A documented "default" response covers every undocumented status code.
     const documentedDefault = responses.find((response) => response.status === 'default');
     if (documentedDefault) return documentedDefault;
   }
 
   const success = responses
-    .filter((response) => /^2\d\d$/.test(response.status))
-    .sort((a, b) => Number(a.status) - Number(b.status));
+    .filter((response) => /^2(?:\d\d|XX)$/i.test(response.status))
+    .sort((a, b) => (numericStatus(a.status) ?? 200) - (numericStatus(b.status) ?? 200));
   if (success.length > 0) return success[0];
 
   const fallback = responses.find((response) => response.status === 'default');
@@ -46,12 +67,16 @@ export function generatePayload(spec: ApiSpec, operation: Operation, options: Ge
   // An operation-level "x-mock.status" is part of the spec and wins over the
   // ad-hoc "?x-mock-status=" query parameter.
   const overrideStatus =
-    override && typeof override['status'] === 'number' ? override['status'] : undefined;
+    override && numericStatus(String(override['status'] ?? '')) !== undefined
+      ? Number(override['status'])
+      : undefined;
 
   const coversRequestedStatus =
     options.status !== undefined &&
     documented !== undefined &&
-    (documented.status === String(options.status) || documented.status === 'default');
+    (numericStatus(documented.status) === options.status ||
+      matchesStatusClass(documented.status, options.status) ||
+      documented.status === 'default');
 
   if (options.status !== undefined && overrideStatus === undefined && !coversRequestedStatus) {
     const synthetic = synthesizeErrorPayload(spec, options.status);
@@ -62,7 +87,9 @@ export function generatePayload(spec: ApiSpec, operation: Operation, options: Ge
   }
 
   const response = documented;
-  const status = overrideStatus ?? (coversRequestedStatus ? (options.status as number) : Number(response?.status ?? 200));
+  const status =
+    overrideStatus ??
+    (coversRequestedStatus ? (options.status as number) : (numericStatus(response?.status) ?? 200));
 
   const headers: Record<string, string> = {};
   if (response) {
