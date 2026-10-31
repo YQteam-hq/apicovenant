@@ -101,6 +101,15 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
       const targetUrl = `${target}${request.url ?? '/'}`;
 
+      // If the client goes away (an SSE consumer that closes the tab, a
+      // cancelled curl), stop pulling from the upstream as well. Otherwise a
+      // never-ending stream keeps this request, and its interaction, alive
+      // forever.
+      const controller = new AbortController();
+      response.on('close', () => {
+        if (!response.writableEnded) controller.abort();
+      });
+
       let upstream: Response;
       try {
         upstream = await fetch(targetUrl, {
@@ -108,8 +117,10 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
           headers: forwardHeaders(request.headers),
           body: ['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase()) ? undefined : requestBody,
           redirect: 'manual',
+          signal: controller.signal,
         });
       } catch (error) {
+        if (controller.signal.aborted) return;
         response.writeHead(502, { 'Content-Type': 'application/json' });
         response.end(
           `${JSON.stringify({ error: 'bad_gateway', message: `could not reach ${target}: ${(error as Error).message}` }, null, 2)}\n`,
@@ -117,12 +128,48 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
         return;
       }
 
-      const responseBody = await upstream.text();
       const responseHeaders: Record<string, string> = {};
       upstream.headers.forEach((value, name) => {
         responseHeaders[name.toLowerCase()] = value;
       });
 
+      const outHeaders: Record<string, string | string[]> = {};
+      upstream.headers.forEach((value, name) => {
+        const lower = name.toLowerCase();
+        // fetch() already decompressed the body, so the upstream framing
+        // headers describe a different byte stream than the one we forward.
+        // Drop them and let Node re-frame the response.
+        if (lower === 'content-encoding' || lower === 'content-length' || lower === 'transfer-encoding') return;
+        outHeaders[name] = value;
+      });
+
+      // Forward bytes as they arrive instead of buffering the complete
+      // response. `await upstream.text()` blocked streaming endpoints
+      // (text/event-stream, chunked logs) until the upstream closed the
+      // connection, so the client received nothing and the body timeout
+      // eventually rejected outside any handler.
+      response.writeHead(upstream.status, outHeaders);
+
+      const responseChunks: Buffer[] = [];
+      try {
+        if (upstream.body) {
+          for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) {
+            const buffer = Buffer.from(chunk);
+            responseChunks.push(buffer);
+            if (!response.destroyed && !response.writableEnded) response.write(buffer);
+          }
+        }
+      } catch (error) {
+        // The upstream aborted mid-stream (or the client disconnected).
+        // Keep what arrived: a truncated golden is still useful, and the
+        // proxy must not turn a broken stream into a dead process.
+        if (!controller.signal.aborted) {
+          process.stderr.write(`apicovenant record: upstream stream ended early: ${(error as Error).message}\n`);
+        }
+      }
+      if (!response.writableEnded && !response.destroyed) response.end();
+
+      const responseBody = Buffer.concat(responseChunks).toString('utf8');
       const contentType = responseHeaders['content-type'] ?? '';
       const bodyType: GoldenInteraction['bodyType'] =
         responseBody.trim() === '' ? 'empty' : contentType.includes('json') ? 'json' : 'text';
@@ -143,24 +190,23 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       captured += 1;
       options.onInteraction?.(interaction);
 
-      const outHeaders: Record<string, string | string[]> = {};
-      upstream.headers.forEach((value, name) => {
-        const lower = name.toLowerCase();
-        // fetch() already decompressed the body, so the upstream framing
-        // headers describe a different byte stream than the one we forward.
-        // Drop them and let Node re-frame the response.
-        if (lower === 'content-encoding' || lower === 'content-length' || lower === 'transfer-encoding') return;
-        outHeaders[name] = value;
-      });
-
-      response.writeHead(upstream.status, outHeaders);
-      response.end(responseBody);
-
       if (options.maxRequests && captured >= options.maxRequests) {
         server.close();
         options.onComplete?.();
       }
-    })();
+    })().catch((error: unknown) => {
+      // Nothing thrown while proxying may escape: an unhandled rejection
+      // terminates the process and the recorded interactions are lost.
+      process.stderr.write(`apicovenant record: request failed: ${(error as Error).message}\n`);
+      if (!response.headersSent) {
+        response.writeHead(502, { 'Content-Type': 'application/json' });
+        response.end(
+          `${JSON.stringify({ error: 'proxy_error', message: (error as Error).message }, null, 2)}\n`,
+        );
+      } else if (!response.writableEnded) {
+        response.destroy();
+      }
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
