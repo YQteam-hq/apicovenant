@@ -32,7 +32,15 @@ export interface RecorderHandle {
   stop(): GoldenFile;
 }
 
-const DEFAULT_REDACT = ['authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization'];
+const DEFAULT_REDACT = [
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+  'x-access-token',
+  'proxy-authorization',
+];
 
 // Query parameter names that usually carry credentials. Unlike headers, query
 // keys have no canonical casing, so we match on the word itself.

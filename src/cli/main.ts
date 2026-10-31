@@ -42,13 +42,14 @@ const OPTIONS = {
   'max-requests': { type: 'string' },
   duration: { type: 'string' },
   'replay-all': { type: 'boolean' },
+  header: { type: 'string', multiple: true, short: 'H' },
   force: { type: 'boolean' },
   category: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
 } as const;
 
-type ParsedValues = Partial<Record<keyof typeof OPTIONS, string | boolean | undefined>>;
+type ParsedValues = Partial<Record<keyof typeof OPTIONS, string | boolean | string[] | undefined>>;
 
 function parse(argv: string[]): { values: ParsedValues; positionals: string[] } {
   const { values, positionals } = parseArgs({
@@ -60,12 +61,30 @@ function parse(argv: string[]): { values: ParsedValues; positionals: string[] } 
   return { values: values as ParsedValues, positionals };
 }
 
-function asString(value: string | boolean | undefined): string | undefined {
+function asString(value: string | boolean | string[] | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function asBoolean(value: string | boolean | undefined): boolean {
+function asBoolean(value: string | boolean | string[] | undefined): boolean {
   return value === true;
+}
+
+function asStringArray(value: string | boolean | string[] | undefined): string[] | undefined {
+  if (Array.isArray(value)) return value;
+  return typeof value === 'string' ? [value] : undefined;
+}
+
+function parseHeaders(values: string[] | undefined): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const entry of values ?? []) {
+    const separator = entry.indexOf(':');
+    const name = separator === -1 ? '' : entry.slice(0, separator).trim();
+    if (!name) {
+      throw new UsageError(`invalid header "${entry}" (expected "Name: value")`);
+    }
+    headers[name] = entry.slice(separator + 1).trim();
+  }
+  return headers;
 }
 
 function requireFormat(value: string | undefined, allowed: string[], fallback: string): string {
@@ -93,7 +112,7 @@ const COMMAND_OPTIONS: Record<string, readonly (keyof typeof OPTIONS)[]> = {
          'config', 'baseline', 'update-baseline', 'no-baseline'],
   mock: ['port', 'host', 'latency'],
   record: ['target', 'out', 'spec', 'host', 'port', 'max-requests', 'duration'],
-  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output'],
+  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output', 'header'],
   rules: ['format', 'category'],
   init: ['output', 'force'],
   mcp: [],
@@ -195,6 +214,7 @@ export async function run(argv: string[]): Promise<number> {
                 | 'html')
             : undefined,
           replayAll: asBoolean(values['replay-all']),
+          headers: parseHeaders(asStringArray(values.header)),
           failOn: parseFailOn(asString(values['fail-on']), ['changed', 'never'] as const),
           config: asString(values.config),
           output: asString(values.output),

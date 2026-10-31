@@ -311,6 +311,15 @@ Safety is the default: **only safe methods are replayed**, so running a diff
 never creates data on the target system. Pass `--replay-all` if you really
 want `POST`, `PUT`, `PATCH` and `DELETE` replayed too.
 
+The recorder redacts credentials (`Authorization`, `Cookie`, `X-Api-Key` and
+friends) before writing the golden file. Replay those endpoints by supplying
+the header again — recorded `<redacted>` values are dropped, never sent:
+
+```bash
+apicovenant diff --golden traffic.golden.json --target https://api.example.com \
+  -H "Authorization: Bearer $API_TOKEN"
+```
+
 You can also diff against the mock instead of a live server:
 
 ```bash

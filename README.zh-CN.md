@@ -303,6 +303,13 @@ contract diff
 
 默认很保守：**只重放安全方法**，所以跑一次 diff 不会在目标系统里造数据。确实需要重放 `POST`、`PUT`、`PATCH`、`DELETE` 时再加 `--replay-all`。
 
+录制时凭据（`Authorization`、`Cookie`、`X-Api-Key` 等）会被脱敏成 `<redacted>`。要重放这类接口，用 `-H` 重新提供真实凭据即可——录制文件里的 `<redacted>` 会被丢弃，绝不会当成真实值发出去：
+
+```bash
+apicovenant diff --golden traffic.golden.json --target https://api.example.com \
+  -H "Authorization: Bearer $API_TOKEN"
+```
+
 也可以直接跟 mock 对比：
 
 ```bash
