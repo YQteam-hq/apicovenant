@@ -35,7 +35,9 @@ export async function runLint(options: LintCommandOptions): Promise<number> {
   const fileConfig = loaded.config;
 
   const format: ReportFormat = options.format ?? fileConfig.format ?? 'text';
-  const output = options.output ?? fileConfig.output;
+  // "--output -" is the conventional way to ask for stdout.
+  const requested = options.output ?? fileConfig.output;
+  const output = requested === '-' ? undefined : requested;
   const severity: Severity = options.severity ?? fileConfig.severity ?? 'info';
   const failOn: FailOn = options.failOn ?? fileConfig.failOn ?? 'error';
   const rules = options.rules && options.rules.length > 0 ? options.rules : fileConfig.rules?.only;
