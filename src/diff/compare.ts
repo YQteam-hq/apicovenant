@@ -3,12 +3,24 @@ import { validateSchema, type SchemaViolation } from '../spec/schema.ts';
 import { deref, followRef } from '../spec/ref.ts';
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import { diffJson, parseBody, type BodyDifference } from './json-diff.ts';
-import { interactionKey, type GoldenFile, type GoldenInteraction } from '../record/golden.ts';
+import {
+  interactionKey,
+  decodeBody,
+  encodeBody,
+  queryPairs,
+  valuesOf,
+  type BodyEncoding,
+  type GoldenFile,
+  type GoldenInteraction,
+  type MultiValue,
+} from '../record/golden.ts';
 
 export interface LiveResponse {
   status: number;
   headers: Record<string, string>;
   body: string;
+
+  bodyEncoding?: BodyEncoding;
 }
 
 export interface LiveSource {
@@ -32,7 +44,7 @@ export class HttpLiveSource implements LiveSource {
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
-    const query = new URLSearchParams(interaction.query).toString();
+    const query = new URLSearchParams(queryPairs(interaction.query)).toString();
     const url = `${this.baseUrl}${interaction.path}${query ? `?${query}` : ''}`;
     return fetchLive(url, interaction, this.timeoutMs);
   }
@@ -49,7 +61,7 @@ export class MockLiveSource implements LiveSource {
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
-    const query = new URLSearchParams(interaction.query).toString();
+    const query = new URLSearchParams(queryPairs(interaction.query)).toString();
     const url = `${this.url}${interaction.path}${query ? `?${query}` : ''}`;
     return fetchLive(url, interaction);
   }
@@ -84,7 +96,11 @@ async function performFetch(
     const response = await fetch(url, {
       method: interaction.method,
       headers: forwardHeaders(interaction.requestHeaders),
-      body: interaction.method === 'GET' || interaction.method === 'HEAD' ? undefined : interaction.body,
+      // Replay the body that was recorded on the request, not the body the
+      // server answered with.
+      body: SAFE_METHODS.has(interaction.method.toUpperCase())
+        ? undefined
+        : new Uint8Array(decodeBody(interaction.requestBody ?? '', interaction.requestBodyEncoding)),
       signal: controller.signal,
       redirect: 'manual',
     });
@@ -94,8 +110,11 @@ async function performFetch(
       headers[name.toLowerCase()] = value;
     });
 
-    const body = await response.text();
-    return { status: response.status, headers, body };
+    // Read bytes, not text: response.text() replaces every byte that is not
+    // valid UTF-8 with U+FFFD, so two different binary payloads can compare
+    // as equal and the same payload can compare as changed.
+    const encoded = encodeBody(Buffer.from(await response.arrayBuffer()));
+    return { status: response.status, headers, body: encoded.body, bodyEncoding: encoded.encoding };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -158,6 +177,9 @@ export interface DiffOptions {
 
 const DEFAULT_COMPARE_HEADERS = ['content-type', 'location', 'etag', 'cache-control'];
 
+const headerText = (value: MultiValue | undefined): string | undefined =>
+  value === undefined ? undefined : valuesOf(value).join(', ');
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // Headers that fetch() must manage itself: a user-supplied content-length
@@ -199,6 +221,9 @@ function matchOperation(spec: ApiSpec, method: string, pathname: string): Operat
 
 export function validateAgainstSpec(spec: ApiSpec, operation: Operation | undefined, response: LiveResponse): SchemaViolation[] {
   if (!operation) return [];
+  // Binary payloads are compared as bytes; schema validation only applies to
+  // parsed JSON.
+  if (response.bodyEncoding === 'base64') return [];
 
   const documented = [...operation.responses.values()].find((entry) => Number(entry.status) === response.status);
   if (!documented) return [];
@@ -264,7 +289,8 @@ export async function compareGolden(
 
     const headerDiffs: HeaderDifference[] = [];
     for (const name of compareHeaders) {
-      const before = interaction.responseHeaders[name] ?? interaction.responseHeaders[name.toLowerCase()];
+      const recorded = interaction.responseHeaders[name] ?? interaction.responseHeaders[name.toLowerCase()];
+      const before = headerText(recorded);
       const after = live.headers[name];
       if (before === undefined && after === undefined) continue;
       headerDiffs.push({
@@ -276,7 +302,14 @@ export async function compareGolden(
     }
 
     const beforeBody = parseBody(interaction.body, interaction.bodyType);
-    const afterBody = parseBody(live.body, live.headers['content-type']?.includes('json') ? 'json' : 'text');
+    const afterBody = parseBody(
+      live.body,
+      live.bodyEncoding === 'base64'
+        ? 'binary'
+        : live.headers['content-type']?.includes('json')
+          ? 'json'
+          : 'text',
+    );
     const differences = diffJson(beforeBody, afterBody);
 
     const operation = options.spec
