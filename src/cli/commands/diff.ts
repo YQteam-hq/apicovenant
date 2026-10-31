@@ -20,6 +20,7 @@ export interface DiffCommandOptions {
   spec?: string;
   format?: ReportFormat;
   replayAll: boolean;
+  headers?: Record<string, string>;
   failOn?: 'changed' | 'never';
   config?: string;
   output?: string;
@@ -54,7 +55,7 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
     mockHandle = await startMockServer(spec);
     source = new MockLiveSource(mockHandle.url, `mock(${options.spec})`);
   } else {
-    source = new HttpLiveSource(options.target as string);
+    source = new HttpLiveSource(options.target as string, undefined, options.headers);
   }
 
   const report: DiffReport = await compareGolden(golden, source, {

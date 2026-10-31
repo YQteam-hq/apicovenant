@@ -148,6 +148,9 @@ Options:
   --output <file>     Write the report to a file instead of stdout
   --config <file>     Read the configuration from this file
   --replay-all        Also replay unsafe methods (POST, PUT, PATCH, DELETE)
+  -H, --header <h>    Send this header on every request ("Name: value"), repeatable.
+                      Overrides the recorded value, which is useful for re-adding
+                      credentials the recorder redacted.
   --fail-on <level>   Exit with code 1 when the contract drifted (changed or never)
   -h, --help          Show this help
 
@@ -158,6 +161,8 @@ Notes:
 Examples:
   apicovenant diff --golden traffic.golden.json --target http://localhost:3000
   apicovenant diff --golden traffic.golden.json --spec openapi.yaml --format html --output drift.html
+  apicovenant diff --golden traffic.golden.json --target http://localhost:3000 \
+    -H "Authorization: Bearer $TOKEN" 
 `;
 
 export const RULES_HELP = `apicovenant rules — show the catalogue of lint rules

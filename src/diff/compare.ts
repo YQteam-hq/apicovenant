@@ -24,19 +24,49 @@ export class HttpLiveSource implements LiveSource {
   readonly description: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly headerOverrides: Record<string, string>;
 
-  constructor(baseUrl: string, timeoutMs = 10_000) {
+  constructor(baseUrl: string, timeoutMs = 10_000, headerOverrides: Record<string, string> = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.description = this.baseUrl;
     this.timeoutMs = timeoutMs;
+    this.headerOverrides = headerOverrides;
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
     const query = new URLSearchParams(interaction.query).toString();
     const url = `${this.baseUrl}${interaction.path}${query ? `?${query}` : ''}`;
-    return fetchLive(url, interaction, this.timeoutMs);
+    const requestHeaders = mergeHeaders(interaction.requestHeaders, this.headerOverrides);
+    return fetchLive(url, { ...interaction, requestHeaders }, this.timeoutMs);
   }
 }
+
+/**
+ * The recorder replaces credentials with "<redacted>" so that a golden file
+ * can be committed. Sending that placeholder upstream guarantees a 401, and
+ * hard-coding a real token in the file would defeat the point of redaction.
+ * Headers supplied with --header replace the recorded (or redacted) value;
+ * everything else that is redacted is dropped instead of forwarded.
+ */
+export function mergeHeaders(
+  recorded: Record<string, string>,
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(recorded)) {
+    if (value === '<redacted>') continue;
+    out[name] = value;
+  }
+  for (const [name, value] of Object.entries(overrides)) {
+    const lower = name.toLowerCase();
+    for (const existing of Object.keys(out)) {
+      if (existing.toLowerCase() === lower) delete out[existing];
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
 
 export class MockLiveSource implements LiveSource {
   readonly description: string;
