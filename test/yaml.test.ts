@@ -185,3 +185,36 @@ test('content after a closed flow collection is an error', () => {
   // Well-formed flow collections are unaffected.
   assert.deepEqual(parseYaml('a: [1, 2]\nb: {c: 3}'), { a: [1, 2], b: { c: 3 } });
 });
+
+test('folds a plain scalar that continues on indented lines', () => {
+  const doc = parseYaml(['description:', '  An optional component name.', '  It continues here.', 'other: x', ''].join('\n'));
+  assert.deepEqual(doc, {
+    description: 'An optional component name. It continues here.',
+    other: 'x',
+  });
+});
+
+test('keeps a blank line inside a plain scalar as a line break', () => {
+  const doc = parseYaml(['description: first line', '  second', '', '  third', 'other: x', ''].join('\n'));
+  assert.equal((doc as Record<string, unknown>)['description'], 'first line second\nthird');
+});
+
+test('folds a quoted scalar across lines', () => {
+  const doc = parseYaml(
+    [
+      'description: \'Optional keys (e.g. {"command": "npm"}) for bash). Values',
+      "  are globs.'",
+      'other: x',
+      '',
+    ].join('\n'),
+  );
+  assert.deepEqual(doc, {
+    description: 'Optional keys (e.g. {"command": "npm"}) for bash). Values are globs.',
+    other: 'x',
+  });
+});
+
+test('an apostrophe inside a key does not swallow the separator', () => {
+  const doc = parseYaml(["Let's Encrypt Certificate:", '  a: 1', ''].join('\n'));
+  assert.deepEqual(doc, { "Let's Encrypt Certificate": { a: 1 } });
+});

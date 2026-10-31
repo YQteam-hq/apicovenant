@@ -193,7 +193,22 @@ class YamlParser {
   private parseChildBlock(parentIndent: number): unknown {
     const next = this.peek();
     if (!next) return null;
-    if (next.indent > parentIndent) return this.parseNode();
+    if (next.indent > parentIndent) {
+      // A plain scalar owns every following line that is indented deeper
+      // than the key, even when those lines line up with the first one:
+      //
+      //   description:
+      //     An optional component name.
+      //     It continues here.
+      //
+      // Passing the key's indent (not the scalar's) lets the folding loop
+      // consume them instead of failing with "Unexpected indentation".
+      if (findKeySeparator(next.text) === -1 && !isSequenceEntry(next.text)) {
+        this.index += 1;
+        return this.parseInlineValue(next.text, parentIndent, next);
+      }
+      return this.parseNode();
+    }
 
     if (next.indent === parentIndent && isSequenceEntry(next.text)) {
       return this.parseSequence(next.indent);
@@ -252,23 +267,58 @@ class YamlParser {
     }
 
     if (value.startsWith('"') || value.startsWith("'")) {
-      const quoted = parseQuoted(value, line.num);
-      return quoted.value;
+      return this.readQuotedValue(value, line);
     }
 
-    const parts = [value];
+    let folded = value;
     for (;;) {
-      const next = this.lines[this.index];
-      if (!next || next.blank) break;
+      // A blank line inside a plain scalar is part of the value: it becomes a
+      // line break instead of ending the scalar. Skip over blanks only when a
+      // continuation line follows.
+      let look = this.index;
+      let blanks = 0;
+      while (this.lines[look]?.blank) {
+        look += 1;
+        blanks += 1;
+      }
+
+      const next = this.lines[look];
+      if (!next) break;
       if (next.indent <= indent) break;
       if (next.text === '---' || next.text === '...') break;
       if (isSequenceEntry(next.text)) break;
       if (findKeySeparator(next.text) !== -1) break;
-      parts.push(next.text.trim());
-      this.index += 1;
+
+      folded += blanks > 0 ? '\n'.repeat(blanks) : ' ';
+      folded += next.text.trim();
+      this.index = look + 1;
     }
 
-    return resolveScalar(parts.join(' '));
+    return resolveScalar(folded);
+  }
+
+  /**
+   * A quoted scalar may span several lines. The closing quote is only found
+   * after the following lines are folded in, where a single line break
+   * becomes one space and a blank line becomes a newline.
+   *
+   *   description: 'Optional keys narrowing the rule (e.g. {\"command\": \"npm\"})
+   *     for bash). Values are globs.'
+   */
+  private readQuotedValue(value: string, line: SourceLine): string {
+    let text = value;
+    for (;;) {
+      try {
+        return parseQuoted(text, line.num).value;
+      } catch (error) {
+        if (!(error instanceof YamlError)) throw error;
+      }
+
+      const next = this.lines[this.index];
+      if (!next) throw new YamlError('Unterminated quoted string', line.num);
+      this.index += 1;
+      text += next.blank ? '\n' : ` ${next.text.trim()}`;
+    }
   }
 
   private parseBlockScalar(header: string, parentIndent: number): string {
@@ -395,7 +445,7 @@ function isFlowClosed(text: string): boolean {
       }
       continue;
     }
-    if (ch === '"' || ch === "'") {
+    if ((ch === '"' || ch === "'") && opensQuotedScalar(text, i)) {
       quote = ch;
       continue;
     }
@@ -403,6 +453,19 @@ function isFlowClosed(text: string): boolean {
     if (ch === ']' || ch === '}') depth -= 1;
   }
   return depth <= 0;
+}
+
+/**
+ * A quote opens a quoted scalar only where a value may start: at the
+ * beginning of the text or after whitespace / a structural character. In
+ * "Let's Encrypt" the apostrophe follows a letter, so it is part of a plain
+ * scalar instead of opening a quote that never closes.
+ */
+function opensQuotedScalar(text: string, index: number): boolean {
+  if (index === 0) return true;
+  const previous = text[index - 1] as string;
+  if (previous === ' ' || previous === '\t') return true;
+  return previous === ':' || previous === '-' || previous === ',' || previous === '[' || previous === '{';
 }
 
 export function findKeySeparator(text: string): number {
@@ -427,7 +490,7 @@ export function findKeySeparator(text: string): number {
       continue;
     }
 
-    if (ch === '"' || ch === "'") {
+    if ((ch === '"' || ch === "'") && opensQuotedScalar(text, i)) {
       quote = ch;
       continue;
     }
@@ -568,7 +631,7 @@ function stripComment(raw: string): string {
       }
       continue;
     }
-    if (ch === '"' || ch === "'") {
+    if ((ch === '"' || ch === "'") && opensQuotedScalar(raw, i)) {
       quote = ch;
       continue;
     }
