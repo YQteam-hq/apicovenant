@@ -32,7 +32,9 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
   const fileConfig = loaded.config;
 
   const format: ReportFormat = options.format ?? fileConfig.format ?? 'text';
-  const output = options.output ?? fileConfig.output;
+  // "--output -" is the conventional way to ask for stdout.
+  const requestedOutput = options.output ?? fileConfig.output;
+  const output = requestedOutput === '-' ? undefined : requestedOutput;
 
   if (!options.target && !options.spec) {
     throw new UsageError('either --target or --spec is required');
@@ -70,6 +72,10 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
         version: VERSION,
         generatedAt: new Date().toISOString(),
         ...report,
+        // report.golden has always held the recorded target URL, which made
+        // "golden" ambiguous in machine-readable output.
+        golden: options.golden,
+        target: report.golden,
       },
       null,
       2,
