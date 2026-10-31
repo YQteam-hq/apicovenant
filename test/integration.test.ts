@@ -330,5 +330,5 @@ test('the recorder redacts credentials', async () => {
   const interaction = golden.interactions[0];
   assert.ok(interaction);
   assert.equal(interaction.requestHeaders['authorization'], '<redacted>');
-  assert.equal(interaction.responseHeaders['set-cookie'], '<redacted>');
+  assert.deepEqual(interaction.responseHeaders['set-cookie'], ['<redacted>']);
 });

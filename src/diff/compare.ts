@@ -3,7 +3,17 @@ import { validateSchema, type SchemaViolation } from '../spec/schema.ts';
 import { deref, followRef } from '../spec/ref.ts';
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import { diffJson, parseBody, type BodyDifference } from './json-diff.ts';
-import { interactionKey, decodeBody, encodeBody, type BodyEncoding, type GoldenFile, type GoldenInteraction } from '../record/golden.ts';
+import {
+  interactionKey,
+  decodeBody,
+  encodeBody,
+  queryPairs,
+  valuesOf,
+  type BodyEncoding,
+  type GoldenFile,
+  type GoldenInteraction,
+  type MultiValue,
+} from '../record/golden.ts';
 
 export interface LiveResponse {
   status: number;
@@ -34,7 +44,7 @@ export class HttpLiveSource implements LiveSource {
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
-    const query = new URLSearchParams(interaction.query).toString();
+    const query = new URLSearchParams(queryPairs(interaction.query)).toString();
     const url = `${this.baseUrl}${interaction.path}${query ? `?${query}` : ''}`;
     return fetchLive(url, interaction, this.timeoutMs);
   }
@@ -51,7 +61,7 @@ export class MockLiveSource implements LiveSource {
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
-    const query = new URLSearchParams(interaction.query).toString();
+    const query = new URLSearchParams(queryPairs(interaction.query)).toString();
     const url = `${this.url}${interaction.path}${query ? `?${query}` : ''}`;
     return fetchLive(url, interaction);
   }
@@ -167,6 +177,9 @@ export interface DiffOptions {
 
 const DEFAULT_COMPARE_HEADERS = ['content-type', 'location', 'etag', 'cache-control'];
 
+const headerText = (value: MultiValue | undefined): string | undefined =>
+  value === undefined ? undefined : valuesOf(value).join(', ');
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // Headers that fetch() must manage itself: a user-supplied content-length
@@ -276,7 +289,8 @@ export async function compareGolden(
 
     const headerDiffs: HeaderDifference[] = [];
     for (const name of compareHeaders) {
-      const before = interaction.responseHeaders[name] ?? interaction.responseHeaders[name.toLowerCase()];
+      const recorded = interaction.responseHeaders[name] ?? interaction.responseHeaders[name.toLowerCase()];
+      const before = headerText(recorded);
       const after = live.headers[name];
       if (before === undefined && after === undefined) continue;
       headerDiffs.push({
