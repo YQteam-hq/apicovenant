@@ -270,6 +270,9 @@ export const schemaArrayItemsRequired: RuleDefinition = {
         const isArray = type === 'array' || (Array.isArray(type) && type.includes('array'));
         if (!isArray) return;
         if (node['items']) return;
+        // OpenAPI 3.1 tuples describe their elements positionally with
+        // prefixItems; requiring "items" as well rejects a valid schema.
+        if (Array.isArray(node['prefixItems']) && node['prefixItems'].length > 0) return;
         report({
           message: `Array in schema "${schemaName}" has no "items" schema`,
           path: `/components/schemas/${schemaName}${pointer}`,
