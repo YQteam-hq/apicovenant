@@ -31,6 +31,32 @@ interface CompiledRoute {
   paramNames: string[];
 }
 
+/**
+ * decodeURIComponent throws on malformed escapes such as "%ZZ". A single
+ * hostile request must not take the whole mock server down, so fall back to
+ * the raw segment.
+ */
+function decodePathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Parses "?x-mock-status=". Returns undefined when the parameter is absent,
+ * null when the value cannot be used as an HTTP status, and the number
+ * otherwise. Returning null (instead of NaN) keeps the value out of
+ * response.writeHead(), which throws on anything outside 100-599.
+ */
+function parseStatusOverride(raw: string | null): number | undefined | null {
+  if (raw === null || raw.trim() === '') return undefined;
+  if (!/^\d{3}$/.test(raw.trim())) return null;
+  const status = Number(raw.trim());
+  return status >= 100 && status <= 599 ? status : null;
+}
+
 export function compilePath(template: string): { regex: RegExp; paramNames: string[] } {
   const paramNames: string[] = [];
   const pattern = template
@@ -68,7 +94,7 @@ export function matchRoute(routes: CompiledRoute[], method: string, pathname: st
 
     const pathParams: Record<string, string> = {};
     route.paramNames.forEach((name, index) => {
-      pathParams[name] = decodeURIComponent(match[index + 1] ?? '');
+      pathParams[name] = decodePathSegment(match[index + 1] ?? '');
     });
     return { operation: route.operation, pathParams };
   }
@@ -104,7 +130,25 @@ export async function startMockServer(spec: ApiSpec, options: MockServerOptions 
   }
 
   const server = http.createServer((request, response) => {
-    void handleRequest(spec, routes, request, response, options);
+    // Every path through the handler must end in a response. Without this
+    // catch an exception (malformed URI, invalid header, bad status code)
+    // propagates as an unhandled rejection and kills the process.
+    handleRequest(spec, routes, request, response, options).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`apicovenant mock: request failed: ${message}\n`);
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      response.writeHead(500, { 'Content-Type': 'application/json' });
+      response.end(`${JSON.stringify({ error: 'internal_error', message }, null, 2)}\n`);
+    });
+  });
+
+  // Requests that Node's HTTP parser rejects never reach the handler above.
+  // Answer them with 400 instead of leaving the socket half open.
+  server.on('clientError', (_error, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
   });
 
   server.keepAliveTimeout = 0;
@@ -136,7 +180,16 @@ async function handleRequest(
   response: http.ServerResponse,
   options: MockServerOptions,
 ): Promise<void> {
-  const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+  // Never build the base from the Host header: Node's URL parser throws on
+  // values such as "a b", and the header is fully attacker controlled.
+  let url: URL;
+  try {
+    url = new URL(request.url ?? '/', 'http://localhost');
+  } catch {
+    response.writeHead(400, { 'Content-Type': 'application/json' });
+    response.end(`${JSON.stringify({ error: 'bad_request', message: 'malformed request target' }, null, 2)}\n`);
+    return;
+  }
   const pathname = url.pathname;
 
   if (pathname === '/_apicovenant/routes') {
@@ -187,7 +240,22 @@ async function handleRequest(
     return;
   }
 
-  const requestedStatus = Number(url.searchParams.get('x-mock-status') ?? '') || undefined;
+  const requestedStatus = parseStatusOverride(url.searchParams.get('x-mock-status'));
+  if (requestedStatus === null) {
+    response.writeHead(400, { 'Content-Type': 'application/json' });
+    response.end(
+      `${JSON.stringify(
+        {
+          error: 'invalid_mock_status',
+          message: `"${url.searchParams.get('x-mock-status') ?? ''}" is not a valid status code (expected an integer from 100 to 599)`,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return;
+  }
+
   const payload = generatePayload(spec, match.operation, { status: requestedStatus });
 
   const latency = payload.status >= 400 ? (options.errorLatency ?? options.latency ?? 0) : (options.latency ?? 0);
@@ -195,6 +263,11 @@ async function handleRequest(
     await new Promise((resolve) => setTimeout(resolve, latency));
   }
 
-  response.writeHead(payload.status, payload.headers);
+  // Belt and braces: a spec can only produce a valid code now, but a bad
+  // status here used to throw from writeHead() and kill the process.
+  const status =
+    Number.isInteger(payload.status) && payload.status >= 100 && payload.status <= 599 ? payload.status : 200;
+
+  response.writeHead(status, payload.headers);
   response.end(payload.body);
 }
