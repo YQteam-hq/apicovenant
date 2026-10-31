@@ -233,8 +233,11 @@ export function buildSpec(raw: unknown, document = '<memory>'): ApiSpec {
     };
 
     for (const method of HTTP_METHODS) {
-      const operationRaw = pathRaw[method];
-      if (!isPlainObject(operationRaw)) continue;
+      const operationNode = pathRaw[method];
+      if (!isPlainObject(operationNode)) continue;
+      // A split document may put the whole operation in another file:
+      //   post: { $ref: 'resources/widgets_create.yml' }
+      const operationRaw = asRecord(followRef(doc, operationNode));
 
       const operationPointer = `${pathPointer}/${method}`;
       const mergedParameters = [

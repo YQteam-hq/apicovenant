@@ -5,6 +5,7 @@ import { isPlainObject } from '../util/text.ts';
 import { readTextFile } from '../util/fs.ts';
 import { buildSpec, type ApiSpec } from './model.ts';
 import { collectRefs, resolveLocalRef } from './ref.ts';
+import { bundleExternalRefs, ExternalRefError } from './external.ts';
 
 export class SpecError extends Error {
   readonly file: string;
@@ -104,7 +105,23 @@ export function loadSpecFromText(text: string, options: LoadOptions = {}): ApiSp
 
 export async function loadSpecFile(filePath: string): Promise<ApiSpec> {
   const text = await readTextFile(filePath);
-  return loadSpecFromText(text, { document: filePath });
+  const doc = parseDocument(text, { document: filePath });
+  validateDocument(doc, filePath);
+
+  // OpenAPI allows splitting a document across files. Everything downstream
+  // only understands local pointers, so pull the referenced files in first.
+  let bundled: unknown;
+  try {
+    bundled = await bundleExternalRefs(doc, filePath);
+  } catch (error) {
+    if (error instanceof ExternalRefError) {
+      throw new SpecError(error.message, filePath);
+    }
+    throw error;
+  }
+
+  validateRefs(bundled, filePath);
+  return buildSpec(bundled, filePath);
 }
 
 export async function loadSpecFromStdin(): Promise<ApiSpec> {
