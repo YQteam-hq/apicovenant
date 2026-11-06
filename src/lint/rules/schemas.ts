@@ -1,7 +1,7 @@
 import type { RuleDefinition } from '../types.ts';
 import { componentSchemas } from '../../spec/model.ts';
 import { isPlainObject, isCamelCase, isSnakeCase, isKebabCase, dominantStyle } from '../../util/text.ts';
-import { isRefNode } from '../../spec/ref.ts';
+import { isRefNode, isDataContainerKey } from '../../spec/ref.ts';
 
 interface RefLocation {
   ref: string;
@@ -10,7 +10,7 @@ interface RefLocation {
 
 function collectRefLocations(doc: unknown, path = ''): RefLocation[] {
   const out: RefLocation[] = [];
-  const visit = (node: unknown, currentPath: string): void => {
+  const visit = (node: unknown, currentPath: string, parentKey?: string): void => {
     if (isRefNode(node)) {
       out.push({ ref: node.$ref, path: currentPath });
       return;
@@ -21,7 +21,10 @@ function collectRefLocations(doc: unknown, path = ''): RefLocation[] {
     }
     if (isPlainObject(node)) {
       for (const [key, value] of Object.entries(node)) {
-        visit(value, `${currentPath}/${key}`);
+        // Example and default payloads hold data: a "$ref" they contain must
+        // not mark a component as referenced.
+        if (isDataContainerKey(key, parentKey)) continue;
+        visit(value, `${currentPath}/${key}`, key);
       }
     }
   };

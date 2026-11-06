@@ -82,39 +82,60 @@ export function compilePath(template: string): { regex: RegExp; paramNames: stri
   return { regex: new RegExp(`^${pattern}/?$`), paramNames };
 }
 
+/**
+ * Ranks a path template by how concrete it is: more segments first, then more
+ * literal segments. Routes used to be matched in declaration order, so
+ * "/users/{id}" declared before "/users/me" swallowed the static endpoint.
+ */
+export function pathSpecificity(template: string): { segments: number; literals: number } {
+  const segments = template.split('/').filter((segment) => segment !== '');
+  const literals = segments.filter((segment) => !segment.includes('{')).length;
+  return { segments: segments.length, literals };
+}
+
+export function comparePathSpecificity(a: string, b: string): number {
+  const left = pathSpecificity(a);
+  const right = pathSpecificity(b);
+  return right.segments - left.segments || right.literals - left.literals;
+}
+
 export function matchRoute(routes: CompiledRoute[], method: string, pathname: string): RouteMatch | undefined {
   const upper = method.toUpperCase();
-  let pathMatched = false;
+  // RFC 9110: HEAD is GET without a response body, so a spec that only
+  // documents GET still answers a HEAD probe instead of reporting 405.
+  const candidates = upper === 'HEAD' ? ['HEAD', 'GET'] : [upper];
 
+  const matched: Array<{ route: CompiledRoute; match: RegExpExecArray }> = [];
   for (const route of routes) {
     const match = route.regex.exec(pathname);
-    if (!match) continue;
-    pathMatched = true;
-    if (route.operation.method.toUpperCase() !== upper) continue;
+    if (match) matched.push({ route, match });
+  }
+  if (matched.length === 0) return undefined;
+
+  // Most specific first; Array.prototype.sort is stable, so equally specific
+  // routes keep their declaration order.
+  matched.sort((a, b) => comparePathSpecificity(a.route.operation.path, b.route.operation.path));
+
+  for (const candidate of candidates) {
+    const found = matched.find((entry) => entry.route.operation.method.toUpperCase() === candidate);
+    if (!found) continue;
 
     const pathParams: Record<string, string> = {};
-    route.paramNames.forEach((name, index) => {
-      pathParams[name] = decodePathSegment(match[index + 1] ?? '');
+    found.route.paramNames.forEach((name, index) => {
+      pathParams[name] = decodePathSegment(found.match[index + 1] ?? '');
     });
-    return { operation: route.operation, pathParams };
+    return { operation: found.route.operation, pathParams };
   }
 
-  if (pathMatched) {
-
-    for (const route of routes) {
-      if (!route.regex.test(pathname)) continue;
-      return {
-        operation: {
-          ...route.operation,
-          method: route.operation.method,
-          raw: { ...route.operation.raw, 'x-method-not-allowed': true },
-        },
-        pathParams: {},
-      };
-    }
-  }
-
-  return undefined;
+  const fallback = matched[0] as { route: CompiledRoute; match: RegExpExecArray };
+  return {
+    operation: {
+      ...fallback.route.operation,
+      method: fallback.route.operation.method,
+      raw: { ...fallback.route.operation.raw, 'x-method-not-allowed': true },
+    },
+    pathParams: {},
+  };
 }
 
 export async function startMockServer(spec: ApiSpec, options: MockServerOptions = {}): Promise<MockServerHandle> {
@@ -128,6 +149,7 @@ export async function startMockServer(spec: ApiSpec, options: MockServerOptions 
       routes.push({ operation, regex: compiled.regex, paramNames: compiled.paramNames });
     }
   }
+  routes.sort((a, b) => comparePathSpecificity(a.operation.path, b.operation.path));
 
   const server = http.createServer((request, response) => {
     // Every path through the handler must end in a response. Without this
@@ -234,7 +256,10 @@ async function handleRequest(
           .filter((route) => route.regex.test(pathname))
           .map((route) => route.operation.method.toUpperCase()),
       ),
-    ].sort();
+    ];
+    // HEAD is implied by GET even when the spec does not list it.
+    if (allowed.includes('GET') && !allowed.includes('HEAD')) allowed.push('HEAD');
+    allowed.sort();
     response.writeHead(405, { 'Content-Type': 'application/json', Allow: allowed.join(', ') });
     response.end(`${JSON.stringify({ error: 'method_not_allowed', message: `${request.method} is not allowed on ${pathname}` }, null, 2)}\n`);
     return;
@@ -269,5 +294,6 @@ async function handleRequest(
     Number.isInteger(payload.status) && payload.status >= 100 && payload.status <= 599 ? payload.status : 200;
 
   response.writeHead(status, payload.headers);
-  response.end(payload.body);
+  // A HEAD response carries the same headers as GET but no body.
+  response.end(request.method?.toUpperCase() === 'HEAD' ? undefined : payload.body);
 }

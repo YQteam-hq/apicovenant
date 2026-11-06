@@ -43,6 +43,7 @@ const OPTIONS = {
   duration: { type: 'string' },
   'replay-all': { type: 'boolean' },
   header: { type: 'string', multiple: true, short: 'H' },
+  query: { type: 'string', multiple: true },
   force: { type: 'boolean' },
   category: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
@@ -87,6 +88,23 @@ function parseHeaders(values: string[] | undefined): Record<string, string> {
   return headers;
 }
 
+function parseQueries(values: string[] | undefined): Record<string, string | string[]> {
+  const query: Record<string, string | string[]> = {};
+  for (const entry of values ?? []) {
+    const separator = entry.indexOf('=');
+    const name = separator === -1 ? '' : entry.slice(0, separator).trim();
+    if (!name) {
+      throw new UsageError(`invalid query parameter "${entry}" (expected "name=value")`);
+    }
+    const value = entry.slice(separator + 1);
+    const existing = query[name];
+    if (existing === undefined) query[name] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else query[name] = [existing, value];
+  }
+  return query;
+}
+
 function requireFormat(value: string | undefined, allowed: string[], fallback: string): string {
   if (!value) return fallback;
   if (!allowed.includes(value)) {
@@ -112,7 +130,7 @@ const COMMAND_OPTIONS: Record<string, readonly (keyof typeof OPTIONS)[]> = {
          'config', 'baseline', 'update-baseline', 'no-baseline'],
   mock: ['port', 'host', 'latency'],
   record: ['target', 'out', 'spec', 'host', 'port', 'max-requests', 'duration'],
-  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output', 'header'],
+  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output', 'header', 'query'],
   rules: ['format', 'category'],
   init: ['output', 'force'],
   mcp: [],
@@ -215,6 +233,7 @@ export async function run(argv: string[]): Promise<number> {
             : undefined,
           replayAll: asBoolean(values['replay-all']),
           headers: parseHeaders(asStringArray(values.header)),
+          query: parseQueries(asStringArray(values.query)),
           failOn: parseFailOn(asString(values['fail-on']), ['changed', 'never'] as const),
           config: asString(values.config),
           output: asString(values.output),

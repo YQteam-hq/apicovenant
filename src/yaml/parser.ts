@@ -55,6 +55,7 @@ class YamlParser {
   }
 
   parseDocument(): unknown {
+    this.skipDirectives();
     this.skipIgnorable();
     const first = this.lines[this.index];
     if (first && first.text === '---') {
@@ -80,6 +81,24 @@ class YamlParser {
     }
 
     return value === undefined ? null : value;
+  }
+
+  /**
+   * "%YAML 1.2" / "%TAG" directives are metadata that prefix the document.
+   * They used to be parsed as a scalar document of their own, so the real
+   * document looked like a second one and the error blamed the line after it.
+   */
+  private skipDirectives(): void {
+    for (;;) {
+      const line = this.lines[this.index];
+      if (!line) return;
+      if (line.blank) {
+        this.index += 1;
+        continue;
+      }
+      if (!line.text.startsWith('%')) return;
+      this.index += 1;
+    }
   }
 
   private skipIgnorable(): void {
@@ -184,7 +203,11 @@ class YamlParser {
       }
 
       this.index += 1;
-      items.push(this.parseInlineValue(content, contentIndent, line));
+      // A plain scalar inside a sequence item continues on every following
+      // line that is indented at least as far as the item's content. The
+      // mapping case folds lines deeper than the key, so the two contexts
+      // need different base indents.
+      items.push(this.parseInlineValue(content, contentIndent, line, true));
     }
 
     return items;
@@ -240,7 +263,7 @@ class YamlParser {
     return parsed;
   }
 
-  private parseInlineValue(text: string, indent: number, line: SourceLine): unknown {
+  private parseInlineValue(text: string, indent: number, line: SourceLine, itemContent = false): unknown {
     const value = text.trim();
 
     if (value.startsWith('*')) {
@@ -284,7 +307,7 @@ class YamlParser {
 
       const next = this.lines[look];
       if (!next) break;
-      if (next.indent <= indent) break;
+      if (itemContent ? next.indent < indent : next.indent <= indent) break;
       if (next.text === '---' || next.text === '...') break;
       if (isSequenceEntry(next.text)) break;
       if (findKeySeparator(next.text) !== -1) break;
@@ -308,14 +331,39 @@ class YamlParser {
   private readQuotedValue(value: string, line: SourceLine): string {
     let text = value;
     for (;;) {
+      let parsed: { value: string; length: number } | undefined;
       try {
-        return parseQuoted(text, line.num).value;
+        parsed = parseQuoted(text, line.num);
       } catch (error) {
         if (!(error instanceof YamlError)) throw error;
       }
 
+      if (parsed) {
+        // Only whitespace may follow the closing quote. Silently dropping the
+        // rest turned typos ("a: \"x\" trailing") into values that looked
+        // fine but had lost part of the document.
+        const trailing = text.slice(parsed.length).trim();
+        if (trailing !== '') {
+          throw new YamlError(
+            `Unexpected content after quoted scalar: "${trailing}"`,
+            line.num,
+            line.indent + 1,
+          );
+        }
+        return parsed.value;
+      }
+
       const next = this.lines[this.index];
       if (!next) throw new YamlError('Unterminated quoted string', line.num);
+      if (next.text === '---' || next.text === '...') {
+        throw new YamlError('Unterminated quoted string', line.num, line.indent + 1);
+      }
+      // A non-blank line that is not indented deeper than the line that opened
+      // the quote starts a new node: the quote was never closed. Folding it in
+      // used to swallow the rest of the document without any error.
+      if (!next.blank && next.indent <= line.indent) {
+        throw new YamlError('Unterminated quoted string', line.num, line.indent + 1);
+      }
       this.index += 1;
       text += next.blank ? '\n' : ` ${next.text.trim()}`;
     }
@@ -325,9 +373,15 @@ class YamlParser {
     const style = header[0] as '|' | '>';
     const modifiers = header.slice(1).trim();
     const chomp = /[-+]/.test(modifiers) ? (modifiers.includes('-') ? 'strip' : 'keep') : 'clip';
+    // An explicit indentation indicator ("|2", ">2") states how many spaces
+    // the content is indented relative to the parent. Without it the indentation
+    // is inferred from the first non-empty line, which changes the value of
+    // indentation-sensitive content.
+    const indentIndicator = /([1-9])/.exec(modifiers);
+    const explicitIndent = indentIndicator ? Number(indentIndicator[1]) : 0;
 
     const collected: string[] = [];
-    let blockIndent = -1;
+    let blockIndent = explicitIndent > 0 ? parentIndent + explicitIndent : -1;
 
     while (this.index < this.lines.length) {
       const current = this.lines[this.index];

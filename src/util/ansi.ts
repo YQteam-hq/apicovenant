@@ -36,6 +36,14 @@ export function colorEnabled(stream: { isTTY?: boolean } = process.stdout): bool
 
 const enabled = colorEnabled();
 
+// SGR sequences emitted by style(). Reports are also written to files with
+// --output, where escape codes are noise that downstream tools cannot read.
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
+
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_PATTERN, '');
+}
+
 export function style(text: string, ...names: StyleName[]): string {
   if (!enabled || names.length === 0) return text;
   let out = text;

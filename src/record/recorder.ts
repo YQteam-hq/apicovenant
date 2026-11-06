@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { createGoldenFile, type GoldenFile, type GoldenInteraction } from './golden.ts';
+import { createGoldenFile, type GoldenFile, type GoldenInteraction, type QueryParams } from './golden.ts';
 
 export interface RecorderOptions {
 
@@ -46,10 +46,23 @@ const DEFAULT_REDACT = [
 // keys have no canonical casing, so we match on the word itself.
 const SENSITIVE_QUERY_KEY = /(api[-_]?key|apikey|access[-_]?token|token|secret|password|passwd|credential|authorization)/i;
 
-const redactQuery = (query: Record<string, string>): Record<string, string> => {
-  const out: Record<string, string> = {};
+const redactQuery = (query: QueryParams): QueryParams => {
+  const out: QueryParams = {};
   for (const [name, value] of Object.entries(query)) {
     out[name] = SENSITIVE_QUERY_KEY.test(name) ? '<redacted>' : value;
+  }
+  return out;
+};
+
+// Object.fromEntries(searchParams) keeps only the last value of a repeated
+// key ("?tag=a&tag=b"), so the golden could not reproduce the request.
+const collectQuery = (searchParams: URLSearchParams): QueryParams => {
+  const out: QueryParams = {};
+  for (const [name, value] of searchParams) {
+    const existing = out[name];
+    if (existing === undefined) out[name] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else out[name] = [existing, value];
   }
   return out;
 };
@@ -185,7 +198,7 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       const interaction: GoldenInteraction = {
         method: (request.method ?? 'GET').toUpperCase(),
         path: requestUrl.pathname,
-        query: redactQuery(Object.fromEntries(requestUrl.searchParams.entries())),
+        query: redactQuery(collectQuery(requestUrl.searchParams)),
         requestHeaders: redactHeaders(request.headers),
         status: upstream.status,
         responseHeaders: redactHeaders(responseHeaders),

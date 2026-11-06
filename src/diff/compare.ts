@@ -1,9 +1,10 @@
-import { compilePath } from '../mock/server.ts';
+import { compilePath, comparePathSpecificity } from '../mock/server.ts';
+import { matchesStatusClass, numericStatus } from '../mock/generator.ts';
 import { validateSchema, type SchemaViolation } from '../spec/schema.ts';
 import { deref, followRef } from '../spec/ref.ts';
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import { diffJson, parseBody, type BodyDifference } from './json-diff.ts';
-import { interactionKey, type GoldenFile, type GoldenInteraction } from '../record/golden.ts';
+import { interactionKey, type GoldenFile, type GoldenInteraction, type QueryParams } from '../record/golden.ts';
 
 export interface LiveResponse {
   status: number;
@@ -25,20 +26,56 @@ export class HttpLiveSource implements LiveSource {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly headerOverrides: Record<string, string>;
+  private readonly queryOverrides: QueryParams;
 
-  constructor(baseUrl: string, timeoutMs = 10_000, headerOverrides: Record<string, string> = {}) {
+  constructor(
+    baseUrl: string,
+    timeoutMs = 10_000,
+    headerOverrides: Record<string, string> = {},
+    queryOverrides: QueryParams = {},
+  ) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.description = this.baseUrl;
     this.timeoutMs = timeoutMs;
     this.headerOverrides = headerOverrides;
+    this.queryOverrides = queryOverrides;
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
-    const query = new URLSearchParams(interaction.query).toString();
+    const query = replayQuery(interaction.query, this.queryOverrides);
     const url = `${this.baseUrl}${interaction.path}${query ? `?${query}` : ''}`;
     const requestHeaders = mergeHeaders(interaction.requestHeaders, this.headerOverrides);
     return fetchLive(url, { ...interaction, requestHeaders }, this.timeoutMs);
   }
+}
+
+/**
+ * Rebuilds the request query from the recording.
+ *
+ * The recorder replaces credentials with "<redacted>". Sending that literal
+ * upstream guarantees a 401, so a redacted value is dropped unless the caller
+ * supplies a replacement (--query), exactly like mergeHeaders() for headers.
+ * Repeated keys ("?tag=a&tag=b") are appended in order instead of being
+ * collapsed into one value.
+ */
+export function replayQuery(query: QueryParams, overrides: QueryParams = {}): string {
+  const params = new URLSearchParams();
+  const append = (name: string, value: QueryParams[string], skipRedacted: boolean): void => {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (skipRedacted && item === '<redacted>') continue;
+      params.append(name, item);
+    }
+  };
+
+  for (const [name, value] of Object.entries(query)) {
+    if (overrides[name] !== undefined) continue;
+    append(name, value, true);
+  }
+  // Overrides win over the recorded value and may also add a parameter the
+  // recorder never saw.
+  for (const [name, value] of Object.entries(overrides)) append(name, value, false);
+
+  return params.toString();
 }
 
 /**
@@ -79,7 +116,7 @@ export class MockLiveSource implements LiveSource {
   }
 
   async request(interaction: GoldenInteraction): Promise<LiveResponse> {
-    const query = new URLSearchParams(interaction.query).toString();
+    const query = replayQuery(interaction.query);
     const url = `${this.url}${interaction.path}${query ? `?${query}` : ''}`;
     return fetchLive(url, interaction);
   }
@@ -217,7 +254,10 @@ function forwardHeaders(headers: Record<string, string | undefined>): Record<str
 
 function matchOperation(spec: ApiSpec, method: string, pathname: string): Operation | undefined {
   const upper = method.toUpperCase();
-  for (const pathItem of spec.paths) {
+  // Same specificity order as the mock router: a static path must not be
+  // shadowed by a parameterised one declared before it.
+  const paths = [...spec.paths].sort((a, b) => comparePathSpecificity(a.path, b.path));
+  for (const pathItem of paths) {
     const { regex } = compilePath(pathItem.path);
     if (!regex.test(pathname)) continue;
     for (const operation of pathItem.operations) {
@@ -230,7 +270,14 @@ function matchOperation(spec: ApiSpec, method: string, pathname: string): Operat
 export function validateAgainstSpec(spec: ApiSpec, operation: Operation | undefined, response: LiveResponse): SchemaViolation[] {
   if (!operation) return [];
 
-  const documented = [...operation.responses.values()].find((entry) => Number(entry.status) === response.status);
+  // "2XX" and "default" are documented responses too; converting the key with
+  // Number() turned them into NaN, so those specs were never validated and
+  // drift was silently missed.
+  const responses = [...operation.responses.values()];
+  const documented =
+    responses.find((entry) => numericStatus(entry.status) === response.status) ??
+    responses.find((entry) => matchesStatusClass(entry.status, response.status)) ??
+    responses.find((entry) => entry.status.toLowerCase() === 'default');
   if (!documented) return [];
 
   const mediaType =

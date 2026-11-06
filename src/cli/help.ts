@@ -151,6 +151,8 @@ Options:
   -H, --header <h>    Send this header on every request ("Name: value"), repeatable.
                       Overrides the recorded value, which is useful for re-adding
                       credentials the recorder redacted.
+  --query <n=v>       Override or add a query parameter, repeatable. The recorder
+                      redacts credential-like query keys; this re-adds them.
   --fail-on <level>   Exit with code 1 when the contract drifted (changed or never)
   -h, --help          Show this help
 
@@ -163,6 +165,8 @@ Examples:
   apicovenant diff --golden traffic.golden.json --spec openapi.yaml --format html --output drift.html
   apicovenant diff --golden traffic.golden.json --target http://localhost:3000 \
     -H "Authorization: Bearer $TOKEN" 
+  apicovenant diff --golden traffic.golden.json --target http://localhost:3000 \
+    --query "api_key=$API_KEY"
 `;
 
 export const RULES_HELP = `apicovenant rules — show the catalogue of lint rules

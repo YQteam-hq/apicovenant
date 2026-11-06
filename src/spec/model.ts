@@ -240,9 +240,18 @@ export function buildSpec(raw: unknown, document = '<memory>'): ApiSpec {
       const operationRaw = asRecord(followRef(doc, operationNode));
 
       const operationPointer = `${pathPointer}/${method}`;
+      const operationParameters = buildParameters(
+        operationRaw['parameters'],
+        doc,
+        `${operationPointer}/parameters`,
+      );
+      // OpenAPI lets an operation re-declare a path-level parameter to
+      // override it. Keeping both copies made the override look like a
+      // duplicate and left lint rules checking the stale definition.
+      const overridden = new Set(operationParameters.map((parameter) => `${parameter.in}:${parameter.name}`));
       const mergedParameters = [
-        ...pathParameters,
-        ...buildParameters(operationRaw['parameters'], doc, `${operationPointer}/parameters`),
+        ...pathParameters.filter((parameter) => !overridden.has(`${parameter.in}:${parameter.name}`)),
+        ...operationParameters,
       ];
 
       let requestBody: RequestBody | undefined;

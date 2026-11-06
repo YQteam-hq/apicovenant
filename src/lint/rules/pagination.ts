@@ -1,9 +1,23 @@
 import type { RuleDefinition } from '../types.ts';
 import { isPlainObject } from '../../util/text.ts';
 import { followRef } from '../../spec/ref.ts';
+import { SINGULAR_EXCEPTIONS } from './paths.ts';
 
-const OFFSET_PARAMS = ['limit', 'offset', 'page', 'page_size', 'pageSize', 'per_page', 'perPage', 'count'];
-const CURSOR_PARAMS = ['cursor', 'after', 'before', 'start_after', 'startAfter', 'next_cursor', 'nextCursor', 'page_token', 'pageToken'];
+// Compared against lower-cased parameter names, so the list itself is lower
+// case: "pageSize".toLowerCase() is "pagesize", which never matched the
+// camelCase entry and silently disabled the rule for real-world specs.
+const OFFSET_PARAMS = ['limit', 'offset', 'page', 'page_size', 'pagesize', 'per_page', 'perpage', 'count'];
+const CURSOR_PARAMS = [
+  'cursor',
+  'after',
+  'before',
+  'start_after',
+  'startafter',
+  'next_cursor',
+  'nextcursor',
+  'page_token',
+  'pagetoken',
+];
 
 type Style = 'offset' | 'cursor' | 'none';
 
@@ -18,6 +32,7 @@ function isCollectionPath(path: string): boolean {
   const segments = path.split('/').filter(Boolean);
   const last = segments[segments.length - 1];
   if (!last || last.startsWith('{')) return false;
+  if (SINGULAR_EXCEPTIONS.has(last.toLowerCase())) return false;
   return last.endsWith('s') && !last.endsWith('ss');
 }
 
