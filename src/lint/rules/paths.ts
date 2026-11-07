@@ -32,7 +32,7 @@ const VERB_SEGMENTS = new Set([
   'import',
 ]);
 
-const SINGULAR_EXCEPTIONS = new Set([
+export const SINGULAR_EXCEPTIONS = new Set([
   'me',
   'self',
   'health',
@@ -40,6 +40,8 @@ const SINGULAR_EXCEPTIONS = new Set([
   'livez',
   'readyz',
   'status',
+  'analysis',
+  'news',
   'version',
   'info',
   'settings',
@@ -158,6 +160,14 @@ export const pathNoVerbs: RuleDefinition = {
   },
 };
 
+// Only used to make the hint concrete; the simplest English rules are enough
+// for path segments and avoid suggestions such as "/categorys".
+function pluralize(word: string): string {
+  if (/[^aeiou]y$/i.test(word)) return `${word.slice(0, -1)}ies`;
+  if (/(s|x|ch|sh)$/i.test(word)) return `${word}es`;
+  return `${word}s`;
+}
+
 export const pathCollectionPlural: RuleDefinition = {
   id: 'path-collection-plural',
   title: 'Collection paths are plural',
@@ -181,7 +191,7 @@ export const pathCollectionPlural: RuleDefinition = {
         message: `Collection path "${pathItem.path}" is not plural`,
         path: pathItem.pointer,
         operation: `* ${pathItem.path}`,
-        hint: `Use "/${last}s" or pick a name that reads as a collection.`,
+        hint: `Use "/${pluralize(last)}" or pick a name that reads as a collection.`,
       });
     }
   },

@@ -1,4 +1,5 @@
 import { isPlainObject } from '../util/text.ts';
+import { isRefNode, resolveLocalRef } from './ref.ts';
 
 export interface JsonSchema {
   type?: string | string[];
@@ -136,6 +137,7 @@ export function validateSchema(value: unknown, schema: unknown, options: Validat
 
     if (isPlainObject(val)) {
       const properties = isPlainObject(s.properties) ? s.properties : {};
+      const patternProperties = isPlainObject(s.patternProperties) ? s.patternProperties : {};
       const required = Array.isArray(s.required) ? s.required : [];
 
       for (const key of required) {
@@ -149,11 +151,28 @@ export function validateSchema(value: unknown, schema: unknown, options: Validat
       }
 
       for (const [key, child] of Object.entries(val)) {
+        let matched = false;
         const childSchema = properties[key];
         if (childSchema) {
           visit(child, childSchema, `${path}/${key}`, `${schemaPath}/properties/${key}`);
-          continue;
+          matched = true;
         }
+        // JSON Schema validates a property against every pattern that
+        // matches it, and only looks at additionalProperties when nothing
+        // else claimed the name.
+        for (const [pattern, patternSchema] of Object.entries(patternProperties)) {
+          if (!isPlainObject(patternSchema)) continue;
+          let regex: RegExp;
+          try {
+            regex = new RegExp(pattern);
+          } catch {
+            continue;
+          }
+          if (!regex.test(key)) continue;
+          visit(child, patternSchema, `${path}/${key}`, `${schemaPath}/patternProperties/${pattern}`);
+          matched = true;
+        }
+        if (matched) continue;
         if (s.additionalProperties === false) {
           violations.push({
             path: `${path}/${key}`,
@@ -331,6 +350,12 @@ export interface GenerateOptions {
   maxDepth?: number;
 
   seed?: string;
+
+  /**
+   * Root document used to resolve "$ref" nodes that survived dereferencing,
+   * which is exactly what a recursive schema leaves behind.
+   */
+  document?: unknown;
 }
 
 export function generateExample(schema: unknown, options: GenerateOptions = {}): unknown {
@@ -339,6 +364,21 @@ export function generateExample(schema: unknown, options: GenerateOptions = {}):
   const build = (sch: unknown, key: string, depth: number): unknown => {
     if (!isPlainObject(sch)) return null;
     const s = sch as JsonSchema;
+
+    // "deref" stops at a recursive reference instead of expanding forever, so
+    // the generator can still meet a "$ref" node. Resolve it against the
+    // document and fall back to an object only when the target is unknown:
+    // treating it as a string produced values that contradicted the contract.
+    if (isRefNode(s)) {
+      const resolved =
+        options.document === undefined ? undefined : resolveLocalRef(options.document, s.$ref);
+      if (resolved === undefined) return {};
+      if (!isPlainObject(resolved)) return resolved;
+      if (depth > maxDepth) {
+        return truncatedValue(resolved as JsonSchema, key, 0, new Set(), options.document);
+      }
+      return build(resolved, key, depth + 1);
+    }
 
 
     const pickBranch = (branches: unknown[], branchKey: string, branchDepth: number): unknown => {
@@ -358,7 +398,7 @@ export function generateExample(schema: unknown, options: GenerateOptions = {}):
     if (s.const !== undefined) return s.const;
 
 
-    if (depth > maxDepth) return truncatedValue(s, key, 0, new Set());
+    if (depth > maxDepth) return truncatedValue(s, key, 0, new Set(), options.document);
 
     if (Array.isArray(s.oneOf) && s.oneOf.length > 0) return pickBranch(s.oneOf, key, depth);
     if (Array.isArray(s.anyOf) && s.anyOf.length > 0) return pickBranch(s.anyOf, key, depth);
@@ -372,7 +412,9 @@ export function generateExample(schema: unknown, options: GenerateOptions = {}):
     }
 
     const names = typeNames(s);
-    const type = names.find((name) => name !== 'null') ?? 'string';
+    // A schema that only allows null must generate null; picking the first
+    // non-null type fell back to "string" for a null-only schema.
+    const type = names.find((name) => name !== 'null') ?? (names.includes('null') ? 'null' : 'string');
 
     switch (type) {
       case 'object': {
@@ -799,7 +841,23 @@ function constrainString(value: string, schema: JsonSchema, key: string): string
 
 const TRUNCATION_MAX_DEPTH = 50;
 
-function truncatedValue(schema: JsonSchema, key: string, depth: number, ancestors: Set<JsonSchema>): unknown {
+function truncatedValue(
+  schema: JsonSchema,
+  key: string,
+  depth: number,
+  ancestors: Set<JsonSchema>,
+  document?: unknown,
+): unknown {
+  if (isRefNode(schema)) {
+    const resolved = document === undefined ? undefined : resolveLocalRef(document, schema.$ref);
+    if (!isPlainObject(resolved)) return null;
+    // The same schema is already being expanded on this branch: further
+    // recursion cannot add information, and the caller only needs a value
+    // that is not off-contract.
+    if (ancestors.has(resolved as JsonSchema)) return {};
+    return truncatedValue(resolved as JsonSchema, key, depth, ancestors, document);
+  }
+
   if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
   if (schema.const !== undefined) return schema.const;
   if (schema.example !== undefined) return schema.example;
@@ -811,7 +869,7 @@ function truncatedValue(schema: JsonSchema, key: string, depth: number, ancestor
     let fallback: unknown;
     for (const branch of branches) {
       if (!isPlainObject(branch)) continue;
-      const candidate = truncatedValue(branch as JsonSchema, key, depth, ancestors);
+      const candidate = truncatedValue(branch as JsonSchema, key, depth, ancestors, document);
       if (fallback === undefined) fallback = candidate;
       if (validateSchema(candidate, branch, { maxErrors: 1 }).length === 0) return candidate;
     }
@@ -819,7 +877,7 @@ function truncatedValue(schema: JsonSchema, key: string, depth: number, ancestor
   }
 
   const names = typeNames(schema);
-  const type = names.find((name) => name !== 'null') ?? 'string';
+  const type = names.find((name) => name !== 'null') ?? (names.includes('null') ? 'null' : 'string');
 
   switch (type) {
     case 'object': {
@@ -832,7 +890,7 @@ function truncatedValue(schema: JsonSchema, key: string, depth: number, ancestor
         for (const requiredName of required) {
           const child = properties[requiredName];
           if (!isPlainObject(child)) continue;
-          out[requiredName] = truncatedValue(child as JsonSchema, requiredName, depth + 1, ancestors);
+          out[requiredName] = truncatedValue(child as JsonSchema, requiredName, depth + 1, ancestors, document);
         }
       } finally {
         ancestors.delete(schema);

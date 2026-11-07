@@ -87,18 +87,57 @@ export function followRef(doc: unknown, node: unknown, maxHops = 20): unknown {
   return current;
 }
 
+/**
+ * Maps whose keys are user-chosen names (schema properties, component names,
+ * header names). A key called "example" or "default" inside one of them is
+ * still a schema or object, not a data value.
+ */
+const NAME_MAP_KEYS = new Set([
+  'properties',
+  'patternProperties',
+  'schemas',
+  'definitions',
+  '$defs',
+  'headers',
+  'securitySchemes',
+  'responses',
+  'requestBodies',
+  'callbacks',
+  'links',
+]);
+
+/**
+ * OpenAPI keeps raw payloads next to the structure in "example" / "examples",
+ * and a JSON Schema keeps a "default" value. A "$ref" inside such a value is
+ * ordinary data, not a reference the document must resolve.
+ */
+export function isDataContainerKey(key: string, parentKey?: string): boolean {
+  if (parentKey !== undefined && NAME_MAP_KEYS.has(parentKey)) return false;
+  if (key === 'example' || key === 'examples') return true;
+  // Anywhere else "default" is a value. Under "responses" it is a Response
+  // Object; that case is covered by NAME_MAP_KEYS above.
+  if (key === 'default') return true;
+  return false;
+}
+
 export function collectRefs(node: unknown, out: Set<string> = new Set<string>()): Set<string> {
-  if (isRefNode(node)) {
-    out.add(node.$ref);
-    return out;
-  }
-  if (Array.isArray(node)) {
-    for (const item of node) collectRefs(item, out);
-    return out;
-  }
-  if (isPlainObject(node)) {
-    for (const value of Object.values(node)) collectRefs(value, out);
-  }
+  const visit = (current: unknown, parentKey?: string): void => {
+    if (isRefNode(current)) {
+      out.add(current.$ref);
+      return;
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item);
+      return;
+    }
+    if (isPlainObject(current)) {
+      for (const [key, value] of Object.entries(current)) {
+        if (isDataContainerKey(key, parentKey)) continue;
+        visit(value, key);
+      }
+    }
+  };
+  visit(node);
   return out;
 }
 

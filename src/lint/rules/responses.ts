@@ -199,6 +199,7 @@ export const responseErrorEnvelope: RuleDefinition = {
 
     const sorted = [...usage.entries()].sort((a, b) => b[1].length - a[1].length);
     const dominant = sorted[0];
+    const dominantName = dominant?.[0];
 
     for (const [name, entries] of sorted) {
       if (sorted.length === 1 && name !== '<inline>') continue;
@@ -213,12 +214,23 @@ export const responseErrorEnvelope: RuleDefinition = {
           });
           continue;
         }
-        if (name === dominant?.[0]) continue;
+        if (name === dominantName) continue;
+        // "<inline>" is an internal placeholder, not a schema name: suggesting
+        // that the user rename an error schema to it is not actionable.
+        if (dominantName === '<inline>') {
+          report({
+            message: `Error response of ${entry.operation} uses the shared schema "${name}" while most error responses are defined inline`,
+            path: entry.path,
+            operation: entry.operation,
+            hint: 'Define the error schema once under "#/components/schemas" and reference it from every error response.',
+          });
+          continue;
+        }
         report({
-          message: `Error response of ${entry.operation} uses "${name}" while the API mostly uses "${dominant?.[0]}"`,
+          message: `Error response of ${entry.operation} uses "${name}" while the API mostly uses "${dominantName}"`,
           path: entry.path,
           operation: entry.operation,
-          hint: `Use the same error schema as the rest of the API ("${dominant?.[0]}").`,
+          hint: `Use the same error schema as the rest of the API ("${dominantName}").`,
         });
       }
     }

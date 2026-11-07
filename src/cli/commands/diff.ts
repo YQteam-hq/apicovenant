@@ -10,6 +10,7 @@ import {
 } from '../../diff/compare.ts';
 import { renderDiffReport } from '../../report/diff.ts';
 import { renderDiffHtmlReport } from '../../report/diff-html.ts';
+import { stripAnsi } from '../../util/ansi.ts';
 import { TOOL_NAME, VERSION } from '../../version.ts';
 import { loadConfig, type ReportFormat } from '../../config.ts';
 import { UsageError, loadSpec } from '../common.ts';
@@ -21,6 +22,7 @@ export interface DiffCommandOptions {
   format?: ReportFormat;
   replayAll: boolean;
   headers?: Record<string, string>;
+  query?: Record<string, string | string[]>;
   failOn?: 'changed' | 'never';
   config?: string;
   output?: string;
@@ -55,52 +57,57 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
     mockHandle = await startMockServer(spec);
     source = new MockLiveSource(mockHandle.url, `mock(${options.spec})`);
   } else {
-    source = new HttpLiveSource(options.target as string, undefined, options.headers);
+    source = new HttpLiveSource(options.target as string, undefined, options.headers, options.query);
   }
 
-  const report: DiffReport = await compareGolden(golden, source, {
-    replayAll: options.replayAll,
-    spec,
-  });
-
-  if (mockHandle) await mockHandle.close();
-
-  let rendered: string;
-  if (format === 'json') {
-    rendered = `${JSON.stringify(
-      {
-        tool: TOOL_NAME,
-        version: VERSION,
-        generatedAt: new Date().toISOString(),
-        ...report,
-        // report.golden has always held the recorded target URL, which made
-        // "golden" ambiguous in machine-readable output.
-        golden: options.golden,
-        target: report.golden,
-      },
-      null,
-      2,
-    )}\n`;
-  } else if (format === 'html') {
-    rendered = renderDiffHtmlReport({
-      report,
-      goldenFile: options.golden,
-      title: 'Contract drift report',
+  try {
+    const report: DiffReport = await compareGolden(golden, source, {
+      replayAll: options.replayAll,
+      spec,
     });
-  } else {
-    rendered = `${renderDiffReport({ report, goldenFile: options.golden })}\n`;
-  }
 
-  if (output) {
-    await writeTextFile(output, rendered);
-    process.stdout.write(
-      `${TOOL_NAME}: report written to ${output} (${report.summary.changed} changed, ${report.summary.unchanged} unchanged)\n`,
-    );
-  } else {
-    process.stdout.write(rendered);
-  }
+    let rendered: string;
+    if (format === 'json') {
+      rendered = `${JSON.stringify(
+        {
+          tool: TOOL_NAME,
+          version: VERSION,
+          generatedAt: new Date().toISOString(),
+          ...report,
+          // report.golden has always held the recorded target URL, which made
+          // "golden" ambiguous in machine-readable output.
+          golden: options.golden,
+          target: report.golden,
+        },
+        null,
+        2,
+      )}\n`;
+    } else if (format === 'html') {
+      rendered = renderDiffHtmlReport({
+        report,
+        goldenFile: options.golden,
+        title: 'Contract drift report',
+      });
+    } else {
+      rendered = `${renderDiffReport({ report, goldenFile: options.golden })}\n`;
+    }
 
-  if (options.failOn === 'never') return 0;
-  if (report.summary.changed > 0 || report.summary.failed > 0) return 1;
-  return 0;
+    if (output) {
+      // Keep the file free of the ANSI escapes the terminal renderer emits.
+      await writeTextFile(output, format === 'text' ? stripAnsi(rendered) : rendered);
+      process.stdout.write(
+        `${TOOL_NAME}: report written to ${output} (${report.summary.changed} changed, ${report.summary.unchanged} unchanged)\n`,
+      );
+    } else {
+      process.stdout.write(rendered);
+    }
+
+    if (options.failOn === 'never') return 0;
+    if (report.summary.changed > 0 || report.summary.failed > 0) return 1;
+    return 0;
+  } finally {
+    // The mock keeps a listening socket, so a failure while comparing or
+    // rendering would otherwise leave the process (and CI) hanging.
+    if (mockHandle) await mockHandle.close();
+  }
 }

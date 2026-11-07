@@ -3,7 +3,7 @@ import { lint, allRules, findRule } from '../../lint/engine.ts';
 import { renderTextReport } from '../../report/text.ts';
 import { renderJsonReport } from '../../report/json.ts';
 import { renderHtmlReport } from '../../report/html.ts';
-import { bold, dim, green, red, yellow } from '../../util/ansi.ts';
+import { bold, dim, green, red, stripAnsi, yellow } from '../../util/ansi.ts';
 import { TOOL_NAME, VERSION } from '../../version.ts';
 import { loadConfig, type FailOn, type ReportFormat } from '../../config.ts';
 import { applyBaseline, buildBaseline, loadBaseline, saveBaseline } from '../../baseline.ts';
@@ -112,7 +112,9 @@ export async function runLint(options: LintCommandOptions): Promise<number> {
   }
 
   if (output) {
-    await writeTextFile(output, report);
+    // A text report is written with the terminal colours already resolved;
+    // strip them so the file stays readable in editors and CI logs.
+    await writeTextFile(output, format === 'text' ? stripAnsi(report) : report);
     const summary = `${counts.error} errors, ${counts.warn} warnings, ${counts.info} info`;
     process.stdout.write(`${green('✓')} report written to ${bold(output)} ${dim(`(${summary})`)}\n`);
   } else {

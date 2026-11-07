@@ -97,7 +97,9 @@ export function generatePayload(spec: ApiSpec, operation: Operation, options: Ge
       const schema = isPlainObject(header) ? header['schema'] : undefined;
       const example = isPlainObject(header) ? header['example'] : undefined;
       if (example !== undefined) headers[name] = String(example);
-      else if (schema !== undefined) headers[name] = String(generateExample(schema, { includeOptional: true }));
+      else if (schema !== undefined) {
+        headers[name] = String(generateExample(schema, { includeOptional: true, document: spec.raw }));
+      }
     }
   }
 
@@ -119,7 +121,7 @@ export function generatePayload(spec: ApiSpec, operation: Operation, options: Ge
   } else if (mediaType?.schema) {
     const schema = followRef(spec.raw, mediaType.schema);
     const expanded = deref(spec.raw, schema);
-    body = generateExample(expanded, { includeOptional: true });
+    body = generateExample(expanded, { includeOptional: true, document: spec.raw });
     if (isPlainObject(expanded) && typeof expanded['example'] !== 'undefined') body = expanded['example'];
   } else if (status === 204 || status === 304) {
     body = undefined;
@@ -150,7 +152,7 @@ export function synthesizeErrorPayload(spec: ApiSpec, status: number): MockPaylo
   if (errorName) {
     const schema = followRef(spec.raw, schemas[errorName]);
     const expanded = deref(spec.raw, schema);
-    const example = generateExample(expanded, { includeOptional: true });
+    const example = generateExample(expanded, { includeOptional: true, document: spec.raw });
     if (isPlainObject(example)) {
       body = {
         code: example['code'] ?? 'error',
