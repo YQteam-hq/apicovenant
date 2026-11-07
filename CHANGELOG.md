@@ -11,6 +11,96 @@ says so.
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-11-07
+
+Twenty one defects from the 1.0.4 review report, fixed across the YAML
+parser, the mock server, the recorder, the diff engine and the linter. The
+rule catalogue is unchanged at 43 rules in 8 categories, every existing
+golden file still loads, and no documented interface changed.
+
+One additive capability lands here rather than in a feature release:
+`diff` can now be given the query parameters a recorded request needs.
+
+Every fix is pinned by `test/defect-fixes.test.ts`.
+
+Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
+
+### Fixed
+
+- **The replay no longer sends the `<redacted>` placeholder for a query
+  parameter.** The recorder replaces credentials in the golden file, and the
+  replay sent that literal string upstream, which guarantees a 401 and a
+  drift report for a request that was never wrong. A redacted value is dropped
+  from the replayed query now, and `--query "name=value"` puts a real value
+  back, the same way `-H` does for a header.
+- **Operation level parameters now override path level ones.** OpenAPI lets an
+  operation re-declare a path level parameter to override it. Both copies were
+  kept, so the override looked like a duplicate and the rules checked the
+  stale definition.
+- **A plain scalar inside a sequence item folds the following lines.** The
+  mapping case folded every line deeper than its key, the sequence case
+  folded none, so a wrapped value under a list item was parsed as a syntax
+  error.
+- **A static path is matched before a parameterised one.** Routes were matched
+  in declaration order, so `/users/{id}` declared before `/users/me` swallowed
+  the static endpoint. Both the mock server and the diff engine now rank the
+  candidates by how concrete they are.
+- **A `$ref` inside an `example` or a `default` value is not a reference.**
+  Those hold data, so a reference in one must not mark a component as used.
+  A component that is genuinely named `example` or `default` is still a
+  component and is still followed.
+- **A recursive `$ref` generates a contract valid mock payload.** The
+  dereferencer stopped at the recursive reference and the generator could not
+  resolve what was left, so the payload contradicted the contract it was
+  generated from. The recursion now resolves against the document and stops
+  at the depth limit.
+- **A schema that only allows `null` generates `null`.** Picking the first
+  non-null type fell back to `string`.
+- **`patternProperties` is honoured before `additionalProperties`.** JSON
+  Schema validates a property against every pattern that matches it, and only
+  looks at `additionalProperties` when nothing else claimed the name.
+- **A text report written with `--output` contains no ANSI escapes.** The
+  terminal colours were written into the file, where downstream tools cannot
+  read them.
+- **A `%YAML` directive is skipped.** `%YAML 1.2` and `%TAG` were parsed as a
+  document of their own, so the real document looked like a second one and the
+  error blamed the line after it.
+- **`2XX` and `default` responses are schema checked during a replay.**
+  Converting the key with `Number()` turned them into `NaN`, so those
+  responses were never validated and the drift was silently missed.
+- **An unterminated quoted scalar is rejected.** A quoted value that ran into
+  the next line swallowed the rest of the document without any error.
+- **Content after a quoted scalar is rejected.** A typo such as
+  `a: "x" trailing` was silently truncated to `x`.
+- **A block scalar indentation indicator is applied.** `|2` and `>2` state
+  how far the content is indented relative to the parent, and the indentation
+  was inferred from the first non-empty line instead, which changes the value
+  of indentation sensitive content.
+- **A singular resource is not treated as a collection.** `/status` and
+  `/analysis` end in a letter that made them look like collections.
+- **The error envelope wording and the plural hint are corrected.** The
+  envelope rule suggested renaming an error schema to the internal
+  `<inline>` placeholder, and the plural hint offered `/categorys`.
+- **`HEAD` falls back to `GET` in the mock server.** RFC 9110 defines HEAD as
+  GET without a response body, so a document that only documents GET still
+  answers a HEAD probe instead of reporting 405.
+- **`diff --spec` always closes the mock server.** A failure while comparing
+  or rendering left the process holding a listening socket, which hung CI.
+- **A repeated query key is preserved in the golden file.** `Object.fromEntries`
+  keeps only the last value, so `?tag=a&tag=b` could not be replayed.
+
+### Added
+
+- **`diff --query "name=value"`.** Overrides or adds a query parameter on
+  every replayed request, and repeats. The recorder redacts credential like
+  query keys; this puts the real value back.
+
+### Changed
+
+- The `query` field of a golden file may now hold a list of strings when a
+  key repeats. A file that holds the plain string form still loads, and the
+  interaction key of a single valued query is unchanged.
+
 ## [1.0.4] — 2026-10-31
 
 Ten fixes to the recorder, the mock server, the diff engine and the YAML
@@ -346,7 +436,8 @@ Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
 - `typescript` is declared as `^5.8.0`: the `erasableSyntaxOnly` compiler
   option used by the project does not exist in 5.6.
 
-[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.5
 [1.0.4]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.4
 [1.0.3]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.3
 [1.0.2]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.2
