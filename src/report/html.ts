@@ -1,4 +1,5 @@
 import type { Finding, Severity } from '../lint/types.ts';
+import { safeSeverity } from './severity.ts';
 
 export interface HtmlReportOptions {
   tool: string;
@@ -16,19 +17,6 @@ export function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-const SEVERITIES: ReadonlySet<string> = new Set<Severity>(['error', 'warn', 'info']);
-
-/**
- * Severity is interpolated into class names and attribute values, so only the
- * three known values may reach the template. A finding built from external
- * data (a baseline, an integration, hand-written JSON) is not guaranteed to
- * honour the TypeScript union at runtime; anything else is treated as the
- * most severe value rather than being echoed into the markup.
- */
-function safeSeverity(value: unknown): Severity {
-  return typeof value === 'string' && SEVERITIES.has(value) ? (value as Severity) : 'error';
 }
 
 export function renderHtmlReport(options: HtmlReportOptions): string {

@@ -13,11 +13,13 @@ says so.
 
 ### Security
 
-- **HTML reports validate the severity before interpolating it.** A finding
-  whose `severity` is not `error`, `warn` or `info` was written verbatim into
-  `class` and `data-severity` attributes, so a crafted value could inject
-  markup or an event handler into the generated report. Unknown values are
-  now reported as `error`; valid findings render exactly as before.
+- **Reports validate the severity before they use it.** A finding whose
+  `severity` is not `error`, `warn` or `info` was written verbatim into the
+  HTML report's `class` and `data-severity` attributes, so a crafted value
+  could inject markup or an event handler into the generated report. The same
+  value made the text report throw and the JSON report count `NaN`. Every
+  report now normalises the severity first: unknown values are reported as
+  `error`, valid findings render exactly as before.
 - **External `$ref` files are confined to the document's directory.** A
   `$ref` containing `..` or an absolute path could read any file the process
   can access and copy its contents into the bundled document. Resolved paths

@@ -95,6 +95,44 @@ test('an out-of-range severity cannot break out of the HTML attribute', () => {
   assert.match(html, /<span class="pill pill-error">error<\/span>/);
 });
 
+test('an out-of-range severity does not break the text report', () => {
+  const output = renderTextReport({
+    document: 'openapi.yaml',
+    findings: [
+      {
+        ruleId: 'x',
+        severity: 'not-a-severity',
+        message: 'payload',
+        path: '/a',
+      } as unknown as Finding,
+    ],
+  });
+
+  assert.match(output, /1 error/);
+  assert.match(output, /error\s+x/);
+  assert.equal(output.includes('not-a-severity'), false);
+});
+
+test('an out-of-range severity does not break the JSON report', () => {
+  const report = buildJsonReport({
+    tool: 'apicovenant',
+    version: '0.1.0',
+    document: 'openapi.yaml',
+    findings: [
+      {
+        ruleId: 'x',
+        severity: 'not-a-severity',
+        message: 'payload',
+        path: '/a',
+      } as unknown as Finding,
+    ],
+  });
+
+  assert.equal(report.summary.error, 1);
+  assert.equal(report.summary.total, 1);
+  assert.equal(report.findings[0]?.severity, 'error');
+});
+
 test('escapeHtml escapes the dangerous characters', () => {
   assert.equal(escapeHtml('<a href="x">&</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
 });
