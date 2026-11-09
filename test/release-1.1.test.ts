@@ -36,9 +36,9 @@ test('golden v1 files are normalised into the v2 model', () => {
     }),
   );
   assert.equal(file.apicovenant, 2);
-  assert.equal(file.interactions[0].bodyEncoding, undefined);
-  assert.equal(file.interactions[0].requestBody, undefined);
-  assert.equal(file.interactions[0].method, 'GET');
+  assert.equal(file.interactions[0]!.bodyEncoding, undefined);
+  assert.equal(file.interactions[0]!.requestBody, undefined);
+  assert.equal(file.interactions[0]!.method, 'GET');
 });
 
 test('golden v2 keeps repeated values, the request body and base64 bodies', () => {
@@ -59,11 +59,11 @@ test('golden v2 keeps repeated values, the request body and base64 bodies', () =
   });
 
   const parsed = parseGoldenFile(serializeGoldenFile(file));
-  assert.deepEqual(parsed.interactions[0].query, { tag: ['a', 'b'] });
-  assert.deepEqual(parsed.interactions[0].responseHeaders['set-cookie'], ['a=1', 'b=2']);
-  assert.equal(parsed.interactions[0].requestBody, 'AAEC');
-  assert.equal(parsed.interactions[0].bodyEncoding, 'base64');
-  assert.equal(parsed.interactions[0].bodyType, 'binary');
+  assert.deepEqual(parsed.interactions[0]!.query, { tag: ['a', 'b'] });
+  assert.deepEqual(parsed.interactions[0]!.responseHeaders['set-cookie'], ['a=1', 'b=2']);
+  assert.equal(parsed.interactions[0]!.requestBody, 'AAEC');
+  assert.equal(parsed.interactions[0]!.bodyEncoding, 'base64');
+  assert.equal(parsed.interactions[0]!.bodyType, 'binary');
 });
 
 test('an unknown golden version is rejected', () => {
@@ -197,7 +197,7 @@ test('diff noise control filters headers and body pointers', async () => {
     ignorePaths: ['/updatedAt'],
   });
   assert.equal(quiet.summary.changed, 0);
-  assert.equal(quiet.interactions[0].body.changed, false);
+  assert.equal(quiet.interactions[0]!.body.changed, false);
 });
 
 test('pointer patterns understand single and double stars', () => {
