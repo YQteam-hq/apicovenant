@@ -42,7 +42,7 @@ function exampleFor(spec: ApiSpec, schema: unknown, example: unknown): unknown {
   return generateExample(resolved, { includeOptional: false });
 }
 
-function serialiseParameter(parameter: Parameter, value: unknown): string {
+function serialiseParameter(value: unknown): string {
   if (Array.isArray(value)) {
     return value.map((entry) => String(entry)).join(',');
   }
@@ -61,7 +61,7 @@ function pushQuery(url: URL, parameter: Parameter, value: unknown): void {
     }
     return;
   }
-  url.searchParams.set(parameter.name, serialiseParameter(parameter, value));
+  url.searchParams.set(parameter.name, serialiseParameter(value));
 }
 
 /**

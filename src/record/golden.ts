@@ -26,6 +26,7 @@ export function decodeBody(body: string, encoding?: BodyEncoding): Buffer {
 }
 
 export type MultiValue = string | string[];
+export type QueryParams = Record<string, MultiValue>;
 
 /**
  * A query key may appear more than once (`?tag=a&tag=b`) and a response may

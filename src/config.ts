@@ -142,7 +142,6 @@ const V2_TOP_LEVEL = new Set([
   'plugins',
 ]);
 const V1_TOP_LEVEL = new Set(['rules', 'severity', 'failOn', 'format', 'output', 'baseline']);
-const RULE_KEYS = new Set(['ignore', 'only']);
 const SEVERITIES: Severity[] = ['error', 'warn', 'info'];
 const V1_FORMATS: ReportFormat[] = ['text', 'json', 'html'];
 const FORMATS: ReportFormat[] = ['text', 'json', 'html', 'sarif', 'junit'];

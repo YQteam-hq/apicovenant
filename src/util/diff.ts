@@ -26,7 +26,7 @@ export function unifiedDiff(before: string, after: string, from: string, to: str
       lines.push(`  ${oldLines[i]}`);
       i += 1;
       j += 1;
-    } else if ((table[i + 1] as number[])[j] >= (table[i] as number[])[j + 1]) {
+    } else if (((table[i + 1] as number[])[j] ?? 0) >= ((table[i] as number[])[j + 1] ?? 0)) {
       lines.push(`- ${oldLines[i]}`);
       i += 1;
     } else {

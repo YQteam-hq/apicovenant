@@ -75,7 +75,6 @@ const OPTIONS = {
   head: { type: 'string' },
   'ignore-change': { type: 'string', multiple: true },
   min: { type: 'string' },
-  'dry-run': { type: 'boolean' },
   'redact-header': { type: 'string', multiple: true },
   'redact-query': { type: 'string', multiple: true },
   header: { type: 'string', multiple: true, short: 'H' },
