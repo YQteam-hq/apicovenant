@@ -40,7 +40,7 @@ const RULE_FILES = [
 
 const ruleSource = RULE_FILES.map(read).join('\n');
 const codeRules = new Map();
-for (const match of ruleSource.matchAll(/id:\s*'([a-z0-9-]+)',[\s\S]*?severity:\s*'(error|warn|info)',[\s\S]*?category:\s*'([a-z]+)'/g)) {
+for (const match of ruleSource.matchAll(/id:\s*'([a-z0-9-]+)',[\s\S]*?severity:\s*'(error|warn|info)',[\s\S]*?category:\s*'([a-z-]+)'/g)) {
   codeRules.set(match[1], { severity: match[2], category: match[3] });
 }
 
@@ -60,6 +60,29 @@ for (const id of docRules.keys()) {
   if (!codeRules.has(id)) fail(`docs/rules.md documents "${id}" but no such rule exists`);
 }
 notes.push(`rules: ${codeRules.size} in code, ${docRules.size} documented`);
+
+// The strict pack is deliberately outside the default 43-rule catalogue. Its
+// IDs and severities are documented as a table, not as "###" rule sections.
+const strictSource = read('src/lint/rules/strict.ts');
+const strictRules = new Map();
+for (const match of strictSource.matchAll(/id:\s*'([a-z0-9-]+)',[\s\S]*?severity:\s*'(error|warn|info)',[\s\S]*?category:\s*'([a-z-]+)'/g)) {
+  strictRules.set(match[1], { severity: match[2], category: match[3] });
+}
+if (strictRules.size !== 6) fail(`expected 6 strict rules, found ${strictRules.size}`);
+const strictDoc = new Map();
+for (const match of rulesDoc.matchAll(/\|\s*`([a-z0-9-]+)`\s*\|\s*(error|warn|info)\s*\|/g)) {
+  strictDoc.set(match[1], match[2]);
+}
+for (const [id, meta] of strictRules) {
+  if (!strictDoc.has(id)) fail(`docs/rules.md does not document the strict rule "${id}"`);
+  else if (strictDoc.get(id) !== meta.severity) {
+    fail(`severity mismatch for strict rule "${id}": code=${meta.severity}, docs=${strictDoc.get(id)}`);
+  }
+}
+for (const id of strictDoc.keys()) {
+  if (!strictRules.has(id)) fail(`docs/rules.md documents strict rule "${id}" but no such rule exists`);
+}
+notes.push(`strict rules: ${strictRules.size} (${codeRules.size} + ${strictRules.size} = ${codeRules.size + strictRules.size})`);
 
 
 const readme = read('README.md');
@@ -174,6 +197,7 @@ for (const file of files) {
   const name = rel(file);
   if (!/\.(ts|mjs|js|json|ya?ml)$/.test(name)) continue;
   if (name.startsWith('assets/') || name.startsWith('examples/') || name.startsWith('.github/')) continue;
+  if (name.startsWith('corpus/specs/')) continue;
 
   if (name === 'scripts/release-check.mjs') continue;
   const text = read(file);

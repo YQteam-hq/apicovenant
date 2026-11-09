@@ -11,6 +11,117 @@ says so.
 
 ## [Unreleased]
 
+## [1.1.0] 2026-11-07
+
+**Contract compatibility, coverage and a v2 configuration.** This release turns
+the linter into a contract lifecycle tool: two documents can be compared for
+breaking changes, recorded traffic can be measured against a document, and the
+configuration can be split per command.
+
+All existing commands, flags, library exports and v1 configuration/golden files
+keep working. Golden files are now written in format 2; format 1 files are read
+and can be migrated.
+
+### Added
+
+- **`apicovenant breaking`** — spec-to-spec compatibility checks with a stable
+  41-class taxonomy, `breaking`/`risky`/`compatible`/`info` severities, JSON and
+  SARIF output, `--fail-on` gates and `--ignore-change`.
+- **`apicovenant test`** — generated contract tests per operation, validated
+  against the documented status, media type and response schema, with a
+  built-in mock target, `--target`, `--include-unsafe` and JSON/JUnit/SARIF
+  output.
+- **JUnit output** for contract tests, plus a reusable JUnit renderer.
+- **Strict mock** — `--strict` validates path, query, header, cookie and body
+  parameters and answers `400`/`413`/`415` with a violation list.
+  `--strict-unknown` additionally rejects undocumented query, header and cookie
+  names while still accepting transport and tracing headers.
+- **Mock CORS and watch** — `--cors`, `--cors-origin`, `--watch` and
+  `--max-body`, also configurable through the v2 `mock` section.
+- **Plugin API** — `apicovenant/plugin` exports `defineRule`, `defineReporter`
+  and `definePreset`; `lint` and `rules` load configured plugins, report plugin
+  sources in the catalogue, and fail loudly (exit 3) when a plugin throws or
+  cannot be loaded. `--no-plugins` disables loading.
+- **`lint --watch`** — re-runs after each document change with a 300 ms debounce,
+  keeps the process alive and leaves the previous report on screen when the new
+  document does not parse.
+- **`lint --fix`** — previews safe mechanical repairs as a unified diff and
+  writes them with `--write`: trailing slashes and OpenAPI 3.1 `nullable`.
+  `--fix-aggressive` optionally camelCases `operationId` values.
+- **Strict rule pack** — six opt-in rules enabled by
+  `extends: ["apicovenant:strict"]`: `response-204-no-content`,
+  `response-201-location`, `schema-example-valid`,
+  `parameter-example-valid`, `request-body-json-content-type` and
+  `security-https`. The default catalogue stays at 43; strict lists 49.
+- **OpenAPI 3.1 keywords** — `unevaluatedProperties`, `dependentRequired`,
+  `dependentSchemas`, `if`/`then`/`else` and local `$dynamicRef` are evaluated;
+  `--strict-schema` warns about keywords the build does not evaluate.
+- **`apicovenant coverage`** — operation coverage of recorded traffic, with
+  literal-before-template routing, undocumented traffic, status gaps and
+  `--min`/`--fail-on` gates.
+- **`apicovenant migrate`** — v1 configuration to v2 and golden format 1 to 2,  with `--dry-run`, `--output` and `--force`.
+- **Configuration v2** — one section per command (`lint`, `diff`, `breaking`,
+  `coverage`, `mock`, `test`), `extends`, and rule-level severity
+  (`off`/`info`/`warn`/`error`). v1 files are still read.
+- **Golden format 2** — repeated query parameters and headers, the request body,
+  byte-exact base64 bodies and the `binary` body type.
+- **SARIF 2.1.0 output** for `lint`, `breaking` and `coverage`.
+- **diff noise control** — `--compare-header`, `--ignore-header` and
+  `--ignore-path` (with `*` and `**` segments), also available in the v2 `diff`
+  section.
+- **Three MCP tools** — `check_breaking_changes`, `check_traffic_coverage` and
+  `run_contract_tests`.
+- **Recorder redaction controls** — `--redact-header` and `--redact-query`
+  extend the built-in credential list.
+- **Performance benchmark** — `npm run bench` / `node scripts/bench.mjs`
+  exercises parse, lint, breaking, coverage and mock cold start against the
+  1.1.0 targets; `--check` makes it a release gate.
+- **GitHub Actions template** — `examples/github-actions.yml` uploads SARIF,
+  publishes JUnit results and gates pull requests on breaking changes.
+- **`init --config-version 1`** writes a v1 configuration for projects that
+  have not migrated yet; the default remains v2.
+- **Runnable plugin example** — `examples/plugin/` contains a rule, reporter,
+  preset and ready-to-use configuration.
+- **YAML and document hardening** — 20 MB, 500,000 line and 10,000 alias
+  limits, with a stat-before-read size check for the document and external
+  `$ref` files.
+- **Release audit** — `node scripts/release-audit.mjs` verifies the shipped
+  files, CLI version, changelog and `release-check`.
+
+### Changed
+
+- `init` writes a v2 configuration by default; `--config-version 1` keeps the
+  legacy layout.
+- Golden files are written as format 2; 1.0.x cannot read format 2, so keep a
+  copy before migrating.
+- `--help` lists `breaking`, `coverage`, `test` and `migrate`; `diff` documents
+  its new noise-control flags, `mock` documents the strict/CORS/watch flags and
+  `lint` documents `--watch` and `--no-plugins`.
+- Numeric CLI values are validated strictly (`12abc` and out-of-range ports are
+  rejected with exit code 2).
+
+### Fixed
+
+- **The two recorder fixes announced in 1.0.4 (#13/#15) are delivered here.**
+  Request and response bodies are forwarded byte-for-byte, the request body is
+  stored and replayed instead of the response body, repeated query parameters
+  and every `Set-Cookie` header survive recording.
+- `diff --replay-all` no longer sends a response body as the request body.
+- `breaking` no longer exhausts memory on large documents with recursive or
+  heavily reused schemas. Schema comparison resolves references lazily and
+  memoizes each base/head object pair instead of deep-expanding every schema.
+- **Public-spec corpus** — `corpus/manifest.json` and
+  `scripts/fetch-corpus.mjs` download five real OpenAPI documents for local
+  compatibility checks; the files stay outside git and CI.
+
+### Notes
+
+- Zero runtime dependencies; Node.js >= 22.18.
+- 341 tests (339 pass, 0 fail, 2 pre-existing skips).
+- `release-check` and `release-audit` cover version consistency, rule counts,
+  required documentation and the shipped file list. Benchmark targets are met
+  without a semantic cache; the rationale is documented in the README.
+
 ## [1.0.5] — 2026-11-07
 
 Twenty one defects from the 1.0.4 review report, fixed across the YAML
