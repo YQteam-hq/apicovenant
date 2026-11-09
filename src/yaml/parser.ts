@@ -29,7 +29,24 @@ const TRUE_VALUES = new Set(['true', 'True', 'TRUE']);
 const FALSE_VALUES = new Set(['false', 'False', 'FALSE']);
 const NULL_VALUES = new Set(['null', 'Null', 'NULL', '~', '']);
 
+const MAX_YAML_BYTES = 20 * 1024 * 1024;
+const MAX_YAML_LINES = 500_000;
+const MAX_ALIAS_EXPANSIONS = 10_000;
+
 export function parseYaml(text: string): unknown {
+  if (Buffer.byteLength(text, 'utf8') > MAX_YAML_BYTES) {
+    throw new YamlError(`YAML document exceeds the ${MAX_YAML_BYTES / (1024 * 1024)} MB limit`, 1);
+  }
+  const lineCount = text.split('\n').length;
+  if (lineCount > MAX_YAML_LINES) {
+    throw new YamlError(`YAML document exceeds the ${MAX_YAML_LINES} line limit`, 1);
+  }
+  // Aliases can expand exponentially when they reference each other. Count
+  // the references in the source before parsing and reject pathological input.
+  const aliases = text.match(/\*[A-Za-z0-9_-]+/g);
+  if (aliases && aliases.length > MAX_ALIAS_EXPANSIONS) {
+    throw new YamlError(`YAML document exceeds the ${MAX_ALIAS_EXPANSIONS} alias limit`, 1);
+  }
   return new YamlParser(text).parseDocument();
 }
 

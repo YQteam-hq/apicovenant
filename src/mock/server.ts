@@ -1,8 +1,10 @@
 import http from 'node:http';
+import { watch, type FSWatcher } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import { generatePayload } from './generator.ts';
+import { validateMockRequest } from './strict.ts';
 
 export interface RouteMatch {
   operation: Operation;
@@ -16,6 +18,24 @@ export interface MockServerOptions {
   latency?: number;
 
   errorLatency?: number;
+
+  /** Validate parameters, cookies and the request body. */
+  strict?: boolean;
+
+  /** Reject query, header and cookie parameters that are not documented. */
+  strictUnknown?: boolean;
+
+  /** Enable CORS. true means every origin; an array is an exact allow-list. */
+  cors?: boolean | string[];
+
+  /** Watch the document and hot-reload the route table. */
+  watch?: boolean;
+
+  /** The document path, required by watch. */
+  specPath?: string;
+
+  /** Request body limit in bytes (default 10 MB). */
+  maxBody?: number;
 }
 
 export interface MockServerHandle {
@@ -29,6 +49,19 @@ interface CompiledRoute {
   operation: Operation;
   regex: RegExp;
   paramNames: string[];
+}
+
+const DEFAULT_MAX_BODY = 10 * 1024 * 1024;
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return (
+    normalized === 'localhost' ||
+    normalized === '127.0.0.1' ||
+    normalized === '::1' ||
+    normalized === '[::1]' ||
+    normalized === '0:0:0:0:0:0:0:1'
+  );
 }
 
 /**
@@ -82,66 +115,58 @@ export function compilePath(template: string): { regex: RegExp; paramNames: stri
   return { regex: new RegExp(`^${pattern}/?$`), paramNames };
 }
 
-/**
- * Ranks a path template by how concrete it is: more segments first, then more
- * literal segments. Routes used to be matched in declaration order, so
- * "/users/{id}" declared before "/users/me" swallowed the static endpoint.
- */
-export function pathSpecificity(template: string): { segments: number; literals: number } {
-  const segments = template.split('/').filter((segment) => segment !== '');
-  const literals = segments.filter((segment) => !segment.includes('{')).length;
-  return { segments: segments.length, literals };
-}
-
 export function comparePathSpecificity(a: string, b: string): number {
-  const left = pathSpecificity(a);
-  const right = pathSpecificity(b);
+  const specificity = (template: string): { segments: number; literals: number } => {
+    const segments = template.split('/').filter((segment) => segment !== '');
+    return {
+      segments: segments.length,
+      literals: segments.filter((segment) => !segment.includes('{')).length,
+    };
+  };
+  const left = specificity(a);
+  const right = specificity(b);
   return right.segments - left.segments || right.literals - left.literals;
 }
 
 export function matchRoute(routes: CompiledRoute[], method: string, pathname: string): RouteMatch | undefined {
   const upper = method.toUpperCase();
-  // RFC 9110: HEAD is GET without a response body, so a spec that only
-  // documents GET still answers a HEAD probe instead of reporting 405.
-  const candidates = upper === 'HEAD' ? ['HEAD', 'GET'] : [upper];
+  let pathMatched = false;
+  const ordered = [...routes].sort((a, b) =>
+    comparePathSpecificity(a.operation.path, b.operation.path),
+  );
 
-  const matched: Array<{ route: CompiledRoute; match: RegExpExecArray }> = [];
-  for (const route of routes) {
+  for (const route of ordered) {
     const match = route.regex.exec(pathname);
-    if (match) matched.push({ route, match });
-  }
-  if (matched.length === 0) return undefined;
-
-  // Most specific first; Array.prototype.sort is stable, so equally specific
-  // routes keep their declaration order.
-  matched.sort((a, b) => comparePathSpecificity(a.route.operation.path, b.route.operation.path));
-
-  for (const candidate of candidates) {
-    const found = matched.find((entry) => entry.route.operation.method.toUpperCase() === candidate);
-    if (!found) continue;
+    if (!match) continue;
+    pathMatched = true;
+    if (route.operation.method.toUpperCase() !== upper) continue;
 
     const pathParams: Record<string, string> = {};
-    found.route.paramNames.forEach((name, index) => {
-      pathParams[name] = decodePathSegment(found.match[index + 1] ?? '');
+    route.paramNames.forEach((name, index) => {
+      pathParams[name] = decodePathSegment(match[index + 1] ?? '');
     });
-    return { operation: found.route.operation, pathParams };
+    return { operation: route.operation, pathParams };
   }
 
-  const fallback = matched[0] as { route: CompiledRoute; match: RegExpExecArray };
-  return {
-    operation: {
-      ...fallback.route.operation,
-      method: fallback.route.operation.method,
-      raw: { ...fallback.route.operation.raw, 'x-method-not-allowed': true },
-    },
-    pathParams: {},
-  };
+  if (pathMatched) {
+
+    for (const route of ordered) {
+      if (!route.regex.test(pathname)) continue;
+      return {
+        operation: {
+          ...route.operation,
+          method: route.operation.method,
+          raw: { ...route.operation.raw, 'x-method-not-allowed': true },
+        },
+        pathParams: {},
+      };
+    }
+  }
+
+  return undefined;
 }
 
-export async function startMockServer(spec: ApiSpec, options: MockServerOptions = {}): Promise<MockServerHandle> {
-  const host = options.host ?? '127.0.0.1';
-  const port = options.port ?? 0;
-
+function buildRoutes(spec: ApiSpec): CompiledRoute[] {
   const routes: CompiledRoute[] = [];
   for (const pathItem of spec.paths) {
     const compiled = compilePath(pathItem.path);
@@ -149,13 +174,70 @@ export async function startMockServer(spec: ApiSpec, options: MockServerOptions 
       routes.push({ operation, regex: compiled.regex, paramNames: compiled.paramNames });
     }
   }
-  routes.sort((a, b) => comparePathSpecificity(a.operation.path, b.operation.path));
+  return routes.sort((a, b) => comparePathSpecificity(a.operation.path, b.operation.path));
+}
+
+function corsHeaders(cors: boolean | string[] | undefined, origin: string | undefined): Record<string, string> {
+  if (!cors) return {};
+  const allowed = Array.isArray(cors) ? cors : ['*'];
+  if (allowed.includes('*')) {
+    return {
+      'Access-Control-Allow-Origin': '*',
+      Vary: 'Origin',
+    };
+  }
+  if (origin && allowed.includes(origin)) {
+    return {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Credentials': 'true',
+      Vary: 'Origin',
+    };
+  }
+  return {};
+}
+
+async function readBody(
+  request: http.IncomingMessage,
+  maxBody: number,
+): Promise<{ text: string; tooLarge: boolean }> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    size += buffer.length;
+    if (size > maxBody) return { text: '', tooLarge: true };
+    chunks.push(buffer);
+  }
+  return { text: Buffer.concat(chunks).toString('utf8'), tooLarge: false };
+}
+
+function documentedMethods(spec: ApiSpec, pathname: string): string[] {
+  const methods = new Set<string>();
+  for (const pathItem of spec.paths) {
+    if (!compilePath(pathItem.path).regex.test(pathname)) continue;
+    for (const operation of pathItem.operations) methods.add(operation.method.toUpperCase());
+  }
+  methods.add('OPTIONS');
+  return [...methods].sort();
+}
+
+export async function startMockServer(spec: ApiSpec, options: MockServerOptions = {}): Promise<MockServerHandle> {
+  const host = options.host ?? '127.0.0.1';
+  const port = options.port ?? 0;
+  const maxBody = options.maxBody ?? DEFAULT_MAX_BODY;
+
+  if (!isLoopbackHost(host)) {
+    process.stderr.write(`apicovenant mock: warning: listening on non-loopback host ${host}\n`);
+  }
+
+  let currentSpec = spec;
+  let routes = buildRoutes(currentSpec);
 
   const server = http.createServer((request, response) => {
     // Every path through the handler must end in a response. Without this
     // catch an exception (malformed URI, invalid header, bad status code)
     // propagates as an unhandled rejection and kills the process.
-    handleRequest(spec, routes, request, response, options).catch((error: unknown) => {
+    handleRequest(() => currentSpec, () => routes, request, response, options, maxBody).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`apicovenant mock: request failed: ${message}\n`);
       if (response.headersSent) {
@@ -174,7 +256,11 @@ export async function startMockServer(spec: ApiSpec, options: MockServerOptions 
   });
 
   server.keepAliveTimeout = 0;
-  server.headersTimeout = 0;
+  // Keep a bounded header/request timeout: a client must not be able to pin a
+  // connection forever. keepAliveTimeout stays 0 to preserve the old behaviour
+  // that avoids ECONNRESET on reused test connections.
+  server.headersTimeout = 60_000;
+  server.requestTimeout = 300_000;
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -184,23 +270,53 @@ export async function startMockServer(spec: ApiSpec, options: MockServerOptions 
   const address = server.address() as AddressInfo;
   const actualPort = address.port;
 
+  let watcher: FSWatcher | undefined;
+  if (options.watch) {
+    if (!options.specPath) {
+      throw new Error('--watch requires a document path');
+    }
+    const specPath = options.specPath;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    watcher = watch(specPath, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void import('../spec/loader.ts')
+          .then((loader) => loader.loadSpecFile(specPath))
+          .then((next) => {
+            currentSpec = next;
+            routes = buildRoutes(next);
+          })
+          .catch((error: unknown) => {
+            // A broken document must not kill a running mock: keep the old
+            // routes and report why the reload was rejected.
+            process.stderr.write(`apicovenant mock: reload failed: ${(error as Error).message}\n`);
+          });
+      }, 300);
+    });
+    watcher.on('error', (error) => {
+      process.stderr.write(`apicovenant mock: watcher error: ${error.message}\n`);
+    });
+  }
+
   return {
     server,
     port: actualPort,
     url: `http://${host}:${actualPort}`,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        watcher?.close();
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
 }
 
 async function handleRequest(
-  spec: ApiSpec,
-  routes: CompiledRoute[],
+  getSpec: () => ApiSpec,
+  getRoutes: () => CompiledRoute[],
   request: http.IncomingMessage,
   response: http.ServerResponse,
   options: MockServerOptions,
+  maxBody: number,
 ): Promise<void> {
   // Never build the base from the Host header: Node's URL parser throws on
   // values such as "a b", and the header is fully attacker controlled.
@@ -214,8 +330,50 @@ async function handleRequest(
   }
   const pathname = url.pathname;
 
+  const send = (status: number, headers: Record<string, string | string[]>, body: string): void => {
+    const origin = Array.isArray(request.headers.origin) ? request.headers.origin[0] : request.headers.origin;
+    response.writeHead(status, { ...corsHeaders(options.cors, origin), ...headers });
+    response.end(body);
+  };
+
+  // Answer a CORS preflight before route matching: the OPTIONS operation is
+  // usually not documented, and a browser needs the headers either way.
+  if (
+    options.cors &&
+    request.method === 'OPTIONS' &&
+    request.headers['access-control-request-method'] !== undefined
+  ) {
+    const origin = Array.isArray(request.headers.origin) ? request.headers.origin[0] : request.headers.origin;
+    const requestedHeaders = request.headers['access-control-request-headers'];
+    send(204, {
+      ...corsHeaders(options.cors, origin),
+      'Access-Control-Allow-Methods': documentedMethods(getSpec(), pathname).join(', '),
+      'Access-Control-Allow-Headers':
+        typeof requestedHeaders === 'string' && requestedHeaders.length > 0 ? requestedHeaders : '*',
+      'Access-Control-Max-Age': '600',
+    }, '');
+    return;
+  }
+
+  const body = await readBody(request, maxBody);
+  if (body.tooLarge) {
+    send(413, { 'Content-Type': 'application/json', Connection: 'close' },
+      `${JSON.stringify(
+        {
+          error: 'payload_too_large',
+          violations: [{ in: 'body', path: '/', message: `request body exceeds ${maxBody} bytes` }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    request.destroy();
+    return;
+  }
+
   if (pathname === '/_apicovenant/routes') {
-    const body = JSON.stringify(
+    const routes = getRoutes();
+    const payload = JSON.stringify(
       {
         routes: routes.map((route) => ({
           method: route.operation.method.toUpperCase(),
@@ -227,15 +385,14 @@ async function handleRequest(
       null,
       2,
     );
-    response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(`${body}\n`);
+    send(200, { 'Content-Type': 'application/json' }, `${payload}\n`);
     return;
   }
 
-  const match = matchRoute(routes, request.method ?? 'GET', pathname);
+  const match = matchRoute(getRoutes(), request.method ?? 'GET', pathname);
 
   if (!match) {
-    const body = JSON.stringify(
+    const payload = JSON.stringify(
       {
         error: 'not_found',
         message: `No operation matches ${request.method} ${pathname}`,
@@ -244,31 +401,46 @@ async function handleRequest(
       null,
       2,
     );
-    response.writeHead(404, { 'Content-Type': 'application/json' });
-    response.end(`${body}\n`);
+    send(404, { 'Content-Type': 'application/json' }, `${payload}\n`);
     return;
   }
 
   if (match.operation.raw['x-method-not-allowed'] === true) {
     const allowed = [
       ...new Set(
-        routes
+        getRoutes()
           .filter((route) => route.regex.test(pathname))
           .map((route) => route.operation.method.toUpperCase()),
       ),
-    ];
-    // HEAD is implied by GET even when the spec does not list it.
-    if (allowed.includes('GET') && !allowed.includes('HEAD')) allowed.push('HEAD');
-    allowed.sort();
-    response.writeHead(405, { 'Content-Type': 'application/json', Allow: allowed.join(', ') });
-    response.end(`${JSON.stringify({ error: 'method_not_allowed', message: `${request.method} is not allowed on ${pathname}` }, null, 2)}\n`);
+    ].sort();
+    send(405, { 'Content-Type': 'application/json', Allow: allowed.join(', ') },
+      `${JSON.stringify({ error: 'method_not_allowed', message: `${request.method} is not allowed on ${pathname}` }, null, 2)}\n`);
     return;
+  }
+
+  if (options.strict || options.strictUnknown) {
+    const validation = validateMockRequest(
+      getSpec(),
+      match.operation,
+      match.pathParams,
+      url,
+      request.headers,
+      body.text,
+      maxBody,
+      options.strictUnknown === true,
+    );
+    if (validation) {
+      send(validation.status, {
+        'Content-Type': 'application/json',
+        ...(validation.status === 413 ? { Connection: 'close' } : {}),
+      }, `${JSON.stringify({ error: validation.error, violations: validation.violations }, null, 2)}\n`);
+      return;
+    }
   }
 
   const requestedStatus = parseStatusOverride(url.searchParams.get('x-mock-status'));
   if (requestedStatus === null) {
-    response.writeHead(400, { 'Content-Type': 'application/json' });
-    response.end(
+    send(400, { 'Content-Type': 'application/json' },
       `${JSON.stringify(
         {
           error: 'invalid_mock_status',
@@ -276,12 +448,11 @@ async function handleRequest(
         },
         null,
         2,
-      )}\n`,
-    );
+      )}\n`);
     return;
   }
 
-  const payload = generatePayload(spec, match.operation, { status: requestedStatus });
+  const payload = generatePayload(getSpec(), match.operation, { status: requestedStatus });
 
   const latency = payload.status >= 400 ? (options.errorLatency ?? options.latency ?? 0) : (options.latency ?? 0);
   if (latency > 0) {
@@ -293,7 +464,5 @@ async function handleRequest(
   const status =
     Number.isInteger(payload.status) && payload.status >= 100 && payload.status <= 599 ? payload.status : 200;
 
-  response.writeHead(status, payload.headers);
-  // A HEAD response carries the same headers as GET but no body.
-  response.end(request.method?.toUpperCase() === 'HEAD' ? undefined : payload.body);
+  send(status, payload.headers, payload.body);
 }
