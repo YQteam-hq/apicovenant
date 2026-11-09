@@ -31,8 +31,10 @@ export interface McpServerOptions {
 const INSTRUCTIONS = [
   'apicovenant guards OpenAPI contracts. Use lint_openapi after editing a document,',
   'list_operations to learn what an API exposes, example_response to see the shape of a',
-  'payload, list_rules to look up a rule, and check_contract_drift to compare recorded',
-  'traffic against a live API or a mock.',
+  'payload, list_rules to look up a rule, check_contract_drift to compare recorded',
+  'traffic against a live API, check_breaking_changes to compare two documents, and',
+  'check_traffic_coverage to see which operations the recorded traffic exercised.',
+  'run_contract_tests generates requests from a document and validates the responses.',
 ].join(' ');
 
 function packageRoot(): string {
@@ -76,7 +78,11 @@ function readResource(uri: string): string | undefined {
     const files = [
       ['rules.md', 'The rule reference'],
       ['configuration.md', 'Configuration files'],
+      ['configuration-v2.md', 'Configuration v2'],
       ['baseline.md', 'Baselines'],
+      ['breaking.md', 'Breaking-change detection'],
+      ['coverage.md', 'Traffic coverage'],
+      ['migration-1.1.md', 'Migrating to 1.1.0'],
       ['mcp.md', 'The Model Context Protocol server'],
     ];
     const lines = ['# apicovenant documentation', ''];

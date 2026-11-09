@@ -61,6 +61,9 @@ was started in.
 | `list_operations` | Every operation with its parameters and documented responses. |
 | `example_response` | A response body generated from the documented schema. |
 | `check_contract_drift` | Replay a golden file and report every difference. |
+| `check_breaking_changes` | Compare two documents: breaking, risky, compatible and info changes. |
+| `check_traffic_coverage` | Operation coverage, undocumented traffic and status gaps. |
+| `run_contract_tests` | Generate requests from the document and validate the responses. |
 
 ### `lint_openapi`
 
@@ -105,6 +108,29 @@ it was generated from.
 One of `spec` and `target` is required. The report lists the status codes,
 headers and body fields that moved, each addressed by JSON Pointer.
 
+### `check_breaking_changes`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `base` | string, required | The old OpenAPI document. |
+| `head` | string, required | The new OpenAPI document. |
+| `ignoreChanges` | string[] | Change ids to ignore, for example `deprecated-added`. |
+
+### `check_traffic_coverage`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `golden` | string, required | A golden file written by `apicovenant record`. |
+| `spec` | string, required | The OpenAPI document. |
+
+### `run_contract_tests`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `spec` | string, required | The OpenAPI document. |
+| `target` | string | A running API. Without it the tool starts a temporary mock. |
+| `includeUnsafe` | boolean | Send `POST`/`PUT`/`PATCH`/`DELETE` too. Defaults to `false`. |
+
 ## The resources
 
 | URI | Contents |
@@ -122,7 +148,7 @@ knows.
 | --- | --- |
 | `initialize` | Negotiates the version and announces the capabilities. |
 | `ping` | Answers with an empty result. |
-| `tools/list` | The five tools, with their input schemas. |
+| `tools/list` | The eight tools, with their input schemas. |
 | `tools/call` | Runs a tool. A tool that fails answers with `isError: true`. |
 | `resources/list` | The two resources. |
 | `resources/read` | The contents of one resource. |

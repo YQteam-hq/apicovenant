@@ -1,5 +1,6 @@
 node_modules/
 coverage/
+!src/coverage/
 *.log
 npm-debug.log*
 .DS_Store
@@ -12,5 +13,6 @@ Thumbs.db
 !.vscode/extensions.json
 dist/
 *.tsbuildinfo
+corpus/specs/
 .tmp/
 out/

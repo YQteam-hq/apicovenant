@@ -6,7 +6,10 @@ import { loadSpecFile } from '../spec/loader.ts';
 import { generatePayload } from '../mock/generator.ts';
 import { startMockServer } from '../mock/server.ts';
 import { compareGolden, MockLiveSource, HttpLiveSource } from '../diff/compare.ts';
+import { compareSpecs } from '../breaking/compare.ts';
+import { measureCoverage, renderCoverageText } from '../coverage/coverage.ts';
 import { parseGoldenFile } from '../record/golden.ts';
+import { runContractTests } from '../contract/run.ts';
 import { readFileSync } from 'node:fs';
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import type { Severity } from '../lint/types.ts';
@@ -64,6 +67,15 @@ function optionalNumber(args: Record<string, unknown>, key: string): number | un
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new ToolInputError(`"${key}" must be a number.`);
+  }
+  return value;
+}
+
+function optionalBoolean(args: Record<string, unknown>, key: string): boolean | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ToolInputError(`"${key}" must be a boolean.`);
   }
   return value;
 }
@@ -497,12 +509,138 @@ const CHECK_DRIFT_TOOL: McpToolDefinition = {
   },
 };
 
+const CHECK_BREAKING_TOOL: McpToolDefinition = {
+  tool: {
+    name: 'check_breaking_changes',
+    title: 'Check two documents for breaking changes',
+    description:
+      'Compare an old and a new OpenAPI document and classify every change as breaking, risky, ' +
+      'compatible or informational. Use it before a release to learn whether existing clients ' +
+      'would break.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        base: { type: 'string', description: 'Path to the old OpenAPI document.' },
+        head: { type: 'string', description: 'Path to the new OpenAPI document.' },
+        ignoreChanges: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Change ids to ignore, such as deprecated-added.',
+        },
+      },
+      required: ['base', 'head'],
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+
+  async run(args, context) {
+    const base = await loadDocument(context, requireString(args, 'base'));
+    const head = await loadDocument(context, requireString(args, 'head'));
+    const ignoreChanges = optionalStringList(args, 'ignoreChanges');
+    const report = compareSpecs(base, head, { ignoreChanges });
+
+    const lines = [
+      `${report.summary.breaking} breaking, ${report.summary.risky} risky, ` +
+        `${report.summary.compatible} compatible, ${report.summary.info} info.`,
+      '',
+    ];
+    for (const change of report.changes) {
+      lines.push(`[${change.severity}] ${change.operation}`);
+      lines.push(`  ${change.id}: ${change.message}`);
+      lines.push(`  ${change.hint}`);
+      lines.push('');
+    }
+    if (report.changes.length === 0) lines.push('The documents are compatible.');
+
+    return textResult(lines.join('\n'), { ...report } as unknown as Record<string, unknown>);
+  },
+};
+
+const CHECK_COVERAGE_TOOL: McpToolDefinition = {
+  tool: {
+    name: 'check_traffic_coverage',
+    title: 'Measure recorded traffic against a document',
+    description:
+      'Compare a golden file with an OpenAPI document: which operations were exercised, which were ' +
+      'not, which traffic is undocumented, and which status codes are outside the document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        golden: { type: 'string', description: 'Path to a golden file recorded by apicovenant record.' },
+        spec: { type: 'string', description: 'Path to the OpenAPI document.' },
+      },
+      required: ['golden', 'spec'],
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+
+  async run(args, context) {
+    const goldenPath = resolvePath(context, requireString(args, 'golden'));
+    const spec = await loadDocument(context, requireString(args, 'spec'));
+    const golden = parseGoldenFile(readFileSync(goldenPath, 'utf8'));
+    const report = measureCoverage(golden, spec, goldenPath);
+    return textResult(renderCoverageText(report), { ...report } as unknown as Record<string, unknown>);
+  },
+};
+
+const RUN_CONTRACT_TESTS_TOOL: McpToolDefinition = {
+  tool: {
+    name: 'run_contract_tests',
+    title: 'Generate and run contract tests',
+    description:
+      'Generate one request per operation from an OpenAPI document and validate the returned status, ' +
+      'media type and JSON body. Without a target the tool starts a temporary mock from the same ' +
+      'document; unsafe methods are skipped unless includeUnsafe is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        spec: { type: 'string', description: 'Path to the OpenAPI document.' },
+        target: { type: 'string', description: 'Base URL of a running API; omit to use a mock.' },
+        includeUnsafe: {
+          type: 'boolean',
+          description: 'Also send POST, PUT, PATCH and DELETE requests (default false).',
+        },
+      },
+      required: ['spec'],
+    },
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  },
+
+  async run(args, context) {
+    const spec = await loadDocument(context, requireString(args, 'spec'));
+    const target = optionalString(args, 'target');
+    const includeUnsafe = optionalBoolean(args, 'includeUnsafe');
+    const run = await runContractTests(spec, { baseUrl: target, includeUnsafe });
+
+    const lines = [
+      `target: ${run.target}`,
+      `${run.summary.failed} failed, ${run.summary.passed} passed, ` +
+        `${run.summary.skipped} skipped, ${run.summary.total} total.`,
+      '',
+    ];
+    for (const result of run.results) {
+      if (result.status === 'pass') lines.push(`PASS ${result.name}`);
+      else if (result.status === 'skip') lines.push(`SKIP ${result.name}: ${result.message ?? 'skipped'}`);
+      else lines.push(`FAIL ${result.name}: ${result.message ?? 'failed'}`);
+    }
+
+    return textResult(lines.join('\n'), {
+      target: run.target,
+      summary: run.summary,
+      results: run.results,
+    });
+  },
+};
+
 export const MCP_TOOLS: McpToolDefinition[] = [
   LINT_TOOL,
   LIST_RULES_TOOL,
   LIST_OPERATIONS_TOOL,
   EXAMPLE_RESPONSE_TOOL,
   CHECK_DRIFT_TOOL,
+  CHECK_BREAKING_TOOL,
+  CHECK_COVERAGE_TOOL,
+  RUN_CONTRACT_TESTS_TOOL,
 ];
 
 export function findMcpTool(name: string): McpToolDefinition | undefined {
