@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 
 import { writeTextFile } from '../../util/fs.ts';
 import { bold, cyan, dim, green, yellow } from '../../util/ansi.ts';
-import { DEFAULT_CONFIG } from '../../config.ts';
 
 export interface InitCommandOptions {
   cwd?: string;
@@ -11,6 +10,8 @@ export interface InitCommandOptions {
   force?: boolean;
 
   fileName?: string;
+
+  configVersion?: 1 | 2;
 }
 
 export async function runInit(options: InitCommandOptions = {}): Promise<number> {
@@ -25,7 +26,25 @@ export async function runInit(options: InitCommandOptions = {}): Promise<number>
     return 1;
   }
 
-  const contents = `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`;
+  const contents = `${JSON.stringify(
+    options.configVersion === 1
+      ? {
+          rules: { ignore: [] },
+          severity: 'info',
+          failOn: 'error',
+          format: 'text',
+        }
+      : {
+          version: 2,
+          extends: ['apicovenant:recommended'],
+          lint: { severity: 'info', failOn: 'error' },
+          diff: { ignoreHeaders: ['etag', 'date'] },
+          breaking: { failOn: 'breaking' },
+          coverage: { min: 80, failOn: 'never' },
+        },
+    null,
+    2,
+  )}\n`;
   await writeTextFile(target, contents);
 
   process.stdout.write(`${green('✓')} wrote ${bold(fileName)}\n`);
