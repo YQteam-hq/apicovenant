@@ -158,7 +158,7 @@ service, and the log names the key.
 
 ## Settings
 
-Four blocks decide what the agent does. They are saved through the
+Five blocks decide what the agent does. They are saved through the
 Management API of the panel, which runs on `127.0.0.1:<port>`:
 
 | Block | What it holds for this repository |
