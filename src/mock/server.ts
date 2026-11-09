@@ -357,6 +357,10 @@ async function handleRequest(
 
   const body = await readBody(request, maxBody);
   if (body.tooLarge) {
+    // Flush the 413 before closing the request stream. Destroying the request
+    // immediately can abort the response on some platforms, so the client sees
+    // a network error instead of the documented JSON body.
+    response.once('finish', () => request.destroy());
     send(413, { 'Content-Type': 'application/json', Connection: 'close' },
       `${JSON.stringify(
         {
@@ -367,7 +371,6 @@ async function handleRequest(
         2,
       )}\n`,
     );
-    request.destroy();
     return;
   }
 
