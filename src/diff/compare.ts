@@ -4,12 +4,24 @@ import { validateSchema, type SchemaViolation } from '../spec/schema.ts';
 import { deref, followRef } from '../spec/ref.ts';
 import type { ApiSpec, Operation } from '../spec/model.ts';
 import { diffJson, parseBody, type BodyDifference } from './json-diff.ts';
-import { interactionKey, type GoldenFile, type GoldenInteraction, type QueryParams } from '../record/golden.ts';
+import {
+  interactionKey,
+  decodeBody,
+  encodeBody,
+  valuesOf,
+  type BodyEncoding,
+  type GoldenFile,
+  type GoldenInteraction,
+  type MultiValue,
+  type QueryParams,
+} from '../record/golden.ts';
 
 export interface LiveResponse {
   status: number;
   headers: Record<string, string>;
   body: string;
+
+  bodyEncoding?: BodyEncoding;
 }
 
 export interface LiveSource {
@@ -47,35 +59,6 @@ export class HttpLiveSource implements LiveSource {
     const requestHeaders = mergeHeaders(interaction.requestHeaders, this.headerOverrides);
     return fetchLive(url, { ...interaction, requestHeaders }, this.timeoutMs);
   }
-}
-
-/**
- * Rebuilds the request query from the recording.
- *
- * The recorder replaces credentials with "<redacted>". Sending that literal
- * upstream guarantees a 401, so a redacted value is dropped unless the caller
- * supplies a replacement (--query), exactly like mergeHeaders() for headers.
- * Repeated keys ("?tag=a&tag=b") are appended in order instead of being
- * collapsed into one value.
- */
-export function replayQuery(query: QueryParams, overrides: QueryParams = {}): string {
-  const params = new URLSearchParams();
-  const append = (name: string, value: QueryParams[string], skipRedacted: boolean): void => {
-    for (const item of Array.isArray(value) ? value : [value]) {
-      if (skipRedacted && item === '<redacted>') continue;
-      params.append(name, item);
-    }
-  };
-
-  for (const [name, value] of Object.entries(query)) {
-    if (overrides[name] !== undefined) continue;
-    append(name, value, true);
-  }
-  // Overrides win over the recorded value and may also add a parameter the
-  // recorder never saw.
-  for (const [name, value] of Object.entries(overrides)) append(name, value, false);
-
-  return params.toString();
 }
 
 /**
@@ -122,6 +105,26 @@ export class MockLiveSource implements LiveSource {
   }
 }
 
+/**
+ * Rebuilds the request query from the recording. Redacted values are dropped
+ * unless --query supplies a replacement, and repeated keys stay repeated.
+ */
+export function replayQuery(query: QueryParams, overrides: QueryParams = {}): string {
+  const params = new URLSearchParams();
+  const append = (name: string, value: QueryParams[string], skipRedacted: boolean): void => {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (skipRedacted && item === '<redacted>') continue;
+      params.append(name, item);
+    }
+  };
+  for (const [name, value] of Object.entries(query)) {
+    if (overrides[name] !== undefined) continue;
+    append(name, value, true);
+  }
+  for (const [name, value] of Object.entries(overrides)) append(name, value, false);
+  return params.toString();
+}
+
 async function fetchLive(url: string, interaction: GoldenInteraction, timeoutMs?: number): Promise<LiveResponse> {
   const attempts = SAFE_METHODS.has(interaction.method.toUpperCase()) ? 2 : 1;
   let failure: unknown;
@@ -151,7 +154,11 @@ async function performFetch(
     const response = await fetch(url, {
       method: interaction.method,
       headers: forwardHeaders(interaction.requestHeaders),
-      body: interaction.method === 'GET' || interaction.method === 'HEAD' ? undefined : interaction.body,
+      // Replay the body that was recorded on the request, not the body the
+      // server answered with.
+      body: SAFE_METHODS.has(interaction.method.toUpperCase())
+        ? undefined
+        : new Uint8Array(decodeBody(interaction.requestBody ?? '', interaction.requestBodyEncoding)),
       signal: controller.signal,
       redirect: 'manual',
     });
@@ -161,8 +168,11 @@ async function performFetch(
       headers[name.toLowerCase()] = value;
     });
 
-    const body = await response.text();
-    return { status: response.status, headers, body };
+    // Read bytes, not text: response.text() replaces every byte that is not
+    // valid UTF-8 with U+FFFD, so two different binary payloads can compare
+    // as equal and the same payload can compare as changed.
+    const encoded = encodeBody(Buffer.from(await response.arrayBuffer()));
+    return { status: response.status, headers, body: encoded.body, bodyEncoding: encoded.encoding };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -218,12 +228,47 @@ export interface DiffOptions {
 
   compareHeaders?: string[];
 
+  /** Header names that never take part in the comparison. */
+  ignoreHeaders?: string[];
+
+  /** JSON Pointer patterns whose body differences are noise, not drift. */
+  ignorePaths?: string[];
+
   replayAll?: boolean;
 
   spec?: ApiSpec;
 }
 
+/**
+ * Matches a JSON Pointer against a pattern such as `/items/<id>/updatedAt`.
+ * A single star matches exactly one segment, a double star matches any
+ * number of segments.
+ */
+export function matchesPointerPattern(pointer: string, pattern: string): boolean {
+  const value = pointer.split('/').filter((segment, index) => index > 0 || segment !== '');
+  const wanted = pattern.split('/').filter((segment, index) => index > 0 || segment !== '');
+
+  const walk = (vi: number, wi: number): boolean => {
+    if (wi === wanted.length) return vi === value.length;
+    const token = wanted[wi];
+    if (token === '**') {
+      for (let skip = vi; skip <= value.length; skip += 1) {
+        if (walk(skip, wi + 1)) return true;
+      }
+      return false;
+    }
+    if (vi >= value.length) return false;
+    if (token !== '*' && token !== value[vi]) return false;
+    return walk(vi + 1, wi + 1);
+  };
+
+  return walk(0, 0);
+}
+
 const DEFAULT_COMPARE_HEADERS = ['content-type', 'location', 'etag', 'cache-control'];
+
+const headerText = (value: MultiValue | undefined): string | undefined =>
+  value === undefined ? undefined : valuesOf(value).join(', ');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -254,8 +299,6 @@ function forwardHeaders(headers: Record<string, string | undefined>): Record<str
 
 function matchOperation(spec: ApiSpec, method: string, pathname: string): Operation | undefined {
   const upper = method.toUpperCase();
-  // Same specificity order as the mock router: a static path must not be
-  // shadowed by a parameterised one declared before it.
   const paths = [...spec.paths].sort((a, b) => comparePathSpecificity(a.path, b.path));
   for (const pathItem of paths) {
     const { regex } = compilePath(pathItem.path);
@@ -269,15 +312,14 @@ function matchOperation(spec: ApiSpec, method: string, pathname: string): Operat
 
 export function validateAgainstSpec(spec: ApiSpec, operation: Operation | undefined, response: LiveResponse): SchemaViolation[] {
   if (!operation) return [];
+  // Binary payloads are compared as bytes; schema validation only applies to
+  // parsed JSON.
+  if (response.bodyEncoding === 'base64') return [];
 
-  // "2XX" and "default" are documented responses too; converting the key with
-  // Number() turned them into NaN, so those specs were never validated and
-  // drift was silently missed.
-  const responses = [...operation.responses.values()];
   const documented =
-    responses.find((entry) => numericStatus(entry.status) === response.status) ??
-    responses.find((entry) => matchesStatusClass(entry.status, response.status)) ??
-    responses.find((entry) => entry.status.toLowerCase() === 'default');
+    [...operation.responses.values()].find((entry) => numericStatus(entry.status) === response.status) ??
+    [...operation.responses.values()].find((entry) => matchesStatusClass(entry.status, response.status)) ??
+    [...operation.responses.values()].find((entry) => entry.status.toLowerCase() === 'default');
   if (!documented) return [];
 
   const mediaType =
@@ -298,7 +340,11 @@ export async function compareGolden(
   source: LiveSource,
   options: DiffOptions = {},
 ): Promise<DiffReport> {
-  const compareHeaders = options.compareHeaders ?? DEFAULT_COMPARE_HEADERS;
+  const ignoredHeaders = new Set((options.ignoreHeaders ?? []).map((name) => name.toLowerCase()));
+  const compareHeaders = (options.compareHeaders ?? DEFAULT_COMPARE_HEADERS).filter(
+    (name) => !ignoredHeaders.has(name.toLowerCase()),
+  );
+  const ignorePaths = options.ignorePaths ?? [];
   const interactions: InteractionDiff[] = [];
 
   for (const interaction of golden.interactions) {
@@ -341,7 +387,8 @@ export async function compareGolden(
 
     const headerDiffs: HeaderDifference[] = [];
     for (const name of compareHeaders) {
-      const before = interaction.responseHeaders[name] ?? interaction.responseHeaders[name.toLowerCase()];
+      const recorded = interaction.responseHeaders[name] ?? interaction.responseHeaders[name.toLowerCase()];
+      const before = headerText(recorded);
       const after = live.headers[name];
       if (before === undefined && after === undefined) continue;
       headerDiffs.push({
@@ -353,8 +400,21 @@ export async function compareGolden(
     }
 
     const beforeBody = parseBody(interaction.body, interaction.bodyType);
-    const afterBody = parseBody(live.body, live.headers['content-type']?.includes('json') ? 'json' : 'text');
-    const differences = diffJson(beforeBody, afterBody);
+    const afterBody = parseBody(
+      live.body,
+      live.bodyEncoding === 'base64'
+        ? 'binary'
+        : live.headers['content-type']?.includes('json')
+          ? 'json'
+          : 'text',
+    );
+    const allDifferences = diffJson(beforeBody, afterBody);
+    const differences =
+      ignorePaths.length === 0
+        ? allDifferences
+        : allDifferences.filter(
+            (difference) => !ignorePaths.some((pattern) => matchesPointerPattern(difference.path, pattern)),
+          );
 
     const operation = options.spec
       ? matchOperation(options.spec, interaction.method, interaction.path)

@@ -1,0 +1,64 @@
+# Copy this workflow into .github/workflows/contract.yml.
+#
+# The job assumes apicovenant is installed as a devDependency:
+#   npm install --save-dev apicovenant
+# It runs the linter, uploads SARIF, runs contract tests with JUnit output, and
+# gates pull requests on breaking changes between the base and head specs.
+name: API contract
+
+on:
+  pull_request:
+    paths:
+      - 'openapi.yaml'
+      - 'openapi.json'
+      - 'apicovenant.config.*'
+      - '.github/workflows/contract.yml'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+
+      # Install the project first so the local apicovenant devDependency is
+      # available. Replace this with "npm ci" when the repository has a lockfile.
+      - run: npm install
+
+      - name: Lint and upload SARIF
+        run: npx apicovenant lint openapi.yaml --format sarif --output apicovenant.sarif --fail-on never
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: apicovenant.sarif
+
+      - name: Gate on lint findings
+        run: npx apicovenant lint openapi.yaml --fail-on error
+
+      - name: Contract tests
+        run: npx apicovenant test openapi.yaml --format junit --output contract.xml --fail-on failure
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-junit
+          path: contract.xml
+
+      - name: Detect breaking changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git show "origin/${{ github.base_ref }}:openapi.yaml" > base.openapi.yaml
+          npx apicovenant breaking --base base.openapi.yaml --head openapi.yaml --fail-on breaking

@@ -44,11 +44,26 @@ export function parseFailOn<T extends string>(value: string | undefined, allowed
   return value as T;
 }
 
-export function parseInteger(value: string | undefined, fallback: number, label: string): number {
+export function parseInteger(
+  value: string | undefined,
+  fallback: number,
+  label: string,
+  minimum?: number,
+  maximum?: number,
+): number {
   if (value === undefined) return fallback;
+  if (!/^-?\d+$/.test(value.trim())) {
+    throw new UsageError(`invalid ${label} "${value}" (expected an integer)`);
+  }
   const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) {
-    throw new UsageError(`invalid ${label} "${value}" (expected a number)`);
+  if (!Number.isFinite(parsed)) {
+    throw new UsageError(`invalid ${label} "${value}" (expected an integer)`);
+  }
+  if (minimum !== undefined && parsed < minimum) {
+    throw new UsageError(`invalid ${label} "${value}" (minimum: ${minimum})`);
+  }
+  if (maximum !== undefined && parsed > maximum) {
+    throw new UsageError(`invalid ${label} "${value}" (maximum: ${maximum})`);
   }
   return parsed;
 }

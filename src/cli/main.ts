@@ -11,6 +11,10 @@ import {
   MOCK_HELP,
   RECORD_HELP,
   RULES_HELP,
+  BREAKING_HELP,
+  COVERAGE_HELP,
+  MIGRATE_HELP,
+  TEST_HELP,
 } from './help.ts';
 import { UsageError, describeError, parseFailOn, parseInteger, parseSeverity, splitList } from './common.ts';
 import { runLint, renderRuleCatalogue } from './commands/lint.ts';
@@ -19,6 +23,13 @@ import { runRecord } from './commands/record.ts';
 import { runDiff } from './commands/diff.ts';
 import { runInit } from './commands/init.ts';
 import { runMcp } from './commands/mcp.ts';
+import { runBreaking } from './commands/breaking.ts';
+import { runCoverage } from './commands/coverage.ts';
+import { runTest } from './commands/test.ts';
+import { runMigrate } from './commands/migrate.ts';
+import { loadConfig } from '../config.ts';
+import { loadPlugins } from '../plugin/load.ts';
+import { STRICT_RULES } from '../lint/rules/strict.ts';
 
 const OPTIONS = {
   format: { type: 'string' },
@@ -35,6 +46,21 @@ const OPTIONS = {
   port: { type: 'string' },
   host: { type: 'string' },
   latency: { type: 'string' },
+  strict: { type: 'boolean' },
+  'strict-unknown': { type: 'boolean' },
+  cors: { type: 'boolean' },
+  'cors-origin': { type: 'string', multiple: true },
+  watch: { type: 'boolean' },
+  'max-body': { type: 'string' },
+  'include-unsafe': { type: 'boolean' },
+  'max-cases': { type: 'string' },
+  'no-plugins': { type: 'boolean' },
+  fix: { type: 'boolean' },
+  write: { type: 'boolean' },
+  'fix-aggressive': { type: 'boolean' },
+  'strict-schema': { type: 'boolean' },
+  'dry-run': { type: 'boolean' },
+  'config-version': { type: 'string' },
   target: { type: 'string' },
   out: { type: 'string' },
   spec: { type: 'string' },
@@ -42,6 +68,15 @@ const OPTIONS = {
   'max-requests': { type: 'string' },
   duration: { type: 'string' },
   'replay-all': { type: 'boolean' },
+  'compare-header': { type: 'string', multiple: true },
+  'ignore-header': { type: 'string', multiple: true },
+  'ignore-path': { type: 'string', multiple: true },
+  base: { type: 'string' },
+  head: { type: 'string' },
+  'ignore-change': { type: 'string', multiple: true },
+  min: { type: 'string' },
+  'redact-header': { type: 'string', multiple: true },
+  'redact-query': { type: 'string', multiple: true },
   header: { type: 'string', multiple: true, short: 'H' },
   query: { type: 'string', multiple: true },
   force: { type: 'boolean' },
@@ -93,9 +128,7 @@ function parseQueries(values: string[] | undefined): Record<string, string | str
   for (const entry of values ?? []) {
     const separator = entry.indexOf('=');
     const name = separator === -1 ? '' : entry.slice(0, separator).trim();
-    if (!name) {
-      throw new UsageError(`invalid query parameter "${entry}" (expected "name=value")`);
-    }
+    if (!name) throw new UsageError(`invalid query parameter "${entry}" (expected "name=value")`);
     const value = entry.slice(separator + 1);
     const existing = query[name];
     if (existing === undefined) query[name] = value;
@@ -121,19 +154,29 @@ const HELP_BY_COMMAND: Record<string, string> = {
   rules: RULES_HELP,
   init: INIT_HELP,
   mcp: MCP_HELP,
+  breaking: BREAKING_HELP,
+  coverage: COVERAGE_HELP,
+  migrate: MIGRATE_HELP,
+  test: TEST_HELP,
 };
 
 // Options each command accepts. A single global option table would silently
 // swallow options that belong to a different command (e.g. "mock --baseline").
 const COMMAND_OPTIONS: Record<string, readonly (keyof typeof OPTIONS)[]> = {
   lint: ['format', 'output', 'rules', 'ignore', 'severity', 'fail-on', 'list-rules',
-         'config', 'baseline', 'update-baseline', 'no-baseline'],
-  mock: ['port', 'host', 'latency'],
-  record: ['target', 'out', 'spec', 'host', 'port', 'max-requests', 'duration'],
-  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output', 'header', 'query'],
-  rules: ['format', 'category'],
-  init: ['output', 'force'],
+         'config', 'baseline', 'update-baseline', 'no-baseline', 'no-plugins', 'watch',
+         'fix', 'write', 'fix-aggressive', 'strict-schema', 'dry-run'],
+  mock: ['port', 'host', 'latency', 'strict', 'strict-unknown', 'cors', 'cors-origin', 'watch', 'max-body', 'config'],
+  record: ['target', 'out', 'spec', 'host', 'port', 'max-requests', 'duration', 'redact-header', 'redact-query'],
+  diff: ['golden', 'target', 'spec', 'format', 'replay-all', 'fail-on', 'config', 'output', 'header',
+         'query', 'compare-header', 'ignore-header', 'ignore-path'],
+  rules: ['format', 'category', 'config', 'no-plugins', 'strict'],
+  init: ['output', 'force', 'config-version'],
   mcp: [],
+  breaking: ['base', 'head', 'format', 'output', 'fail-on', 'ignore-change', 'config'],
+  coverage: ['golden', 'spec', 'format', 'output', 'min', 'fail-on', 'config'],
+  migrate: ['config', 'golden', 'output', 'dry-run', 'force'],
+  test: ['target', 'include-unsafe', 'fail-on', 'format', 'output', 'max-cases', 'config'],
 };
 
 // Accepted everywhere, on every command.
@@ -177,12 +220,7 @@ export async function run(argv: string[]): Promise<number> {
       case 'lint':
         return await runLint({
           document: positionals[1] ?? '',
-          format: asString(values.format)
-            ? (requireFormat(asString(values.format), ['text', 'json', 'html'], 'text') as
-                | 'text'
-                | 'json'
-                | 'html')
-            : undefined,
+          format: asString(values.format),
           output: asString(values.output),
           rules: splitList(asString(values.rules)),
           ignore: splitList(asString(values.ignore)),
@@ -195,14 +233,29 @@ export async function run(argv: string[]): Promise<number> {
           baseline: asString(values.baseline),
           updateBaseline: asString(values['update-baseline']),
           noBaseline: asBoolean(values['no-baseline']),
+          noPlugins: asBoolean(values['no-plugins']),
+          watch: asBoolean(values.watch),
+          fix: asBoolean(values.fix),
+          write: asBoolean(values.write),
+          fixAggressive: asBoolean(values['fix-aggressive']),
+          strictSchema: asBoolean(values['strict-schema']),
         });
 
       case 'mock':
         return await runMock({
           document: positionals[1] ?? '',
           host: asString(values.host) ?? '127.0.0.1',
-          port: parseInteger(asString(values.port), 0, 'port'),
-          latency: parseInteger(asString(values.latency), 0, 'latency'),
+          port: parseInteger(asString(values.port), 0, 'port', 0, 65535),
+          latency: parseInteger(asString(values.latency), 0, 'latency', 0, 600_000),
+          strict: asBoolean(values.strict),
+          strictUnknown: asBoolean(values['strict-unknown']),
+          cors: asBoolean(values.cors),
+          corsOrigins: asStringArray(values['cors-origin']),
+          watch: asBoolean(values.watch),
+          maxBody: asString(values['max-body']) !== undefined
+            ? parseInteger(asString(values['max-body']), 0, 'max-body', 1)
+            : undefined,
+          config: asString(values.config),
         });
 
       case 'record':
@@ -211,13 +264,15 @@ export async function run(argv: string[]): Promise<number> {
           out: asString(values.out) ?? '',
           spec: asString(values.spec),
           host: asString(values.host) ?? '127.0.0.1',
-          port: parseInteger(asString(values.port), 0, 'port'),
+          port: parseInteger(asString(values.port), 0, 'port', 0, 65535),
           maxRequests: asString(values['max-requests'])
-            ? parseInteger(asString(values['max-requests']), 0, 'max-requests')
+            ? parseInteger(asString(values['max-requests']), 0, 'max-requests', 1)
             : undefined,
           durationSeconds: asString(values.duration)
-            ? parseInteger(asString(values.duration), 0, 'duration')
+            ? parseInteger(asString(values.duration), 0, 'duration', 1)
             : undefined,
+          redactHeaders: asStringArray(values['redact-header']),
+          redactQueries: asStringArray(values['redact-query']),
         });
 
       case 'diff':
@@ -234,22 +289,99 @@ export async function run(argv: string[]): Promise<number> {
           replayAll: asBoolean(values['replay-all']),
           headers: parseHeaders(asStringArray(values.header)),
           query: parseQueries(asStringArray(values.query)),
+          compareHeaders: asStringArray(values['compare-header']),
+          ignoreHeaders: asStringArray(values['ignore-header']),
+          ignorePaths: asStringArray(values['ignore-path']),
           failOn: parseFailOn(asString(values['fail-on']), ['changed', 'never'] as const),
           config: asString(values.config),
           output: asString(values.output),
         });
 
+      case 'breaking':
+        return await runBreaking({
+          base: asString(values.base) ?? '',
+          head: asString(values.head) ?? '',
+          format: asString(values.format)
+            ? (requireFormat(asString(values.format), ['text', 'json', 'sarif'], 'text') as
+                | 'text'
+                | 'json'
+                | 'sarif')
+            : undefined,
+          output: asString(values.output),
+          failOn: parseFailOn(asString(values['fail-on']), ['breaking', 'risky', 'any', 'never'] as const),
+          ignoreChanges: asStringArray(values['ignore-change']),
+          config: asString(values.config),
+        });
+
+      case 'coverage':
+        return await runCoverage({
+          golden: asString(values.golden) ?? '',
+          spec: asString(values.spec) ?? '',
+          format: asString(values.format)
+            ? (requireFormat(asString(values.format), ['text', 'json', 'sarif'], 'text') as
+                | 'text'
+                | 'json'
+                | 'sarif')
+            : undefined,
+          output: asString(values.output),
+          min: asString(values.min) !== undefined
+            ? parseInteger(asString(values.min), 0, 'min', 0, 100)
+            : undefined,
+          failOn: parseFailOn(asString(values['fail-on']), ['gap', 'undocumented', 'never'] as const),
+          config: asString(values.config),
+        });
+
+      case 'migrate':
+        return await runMigrate({
+          config: asString(values.config),
+          golden: asString(values.golden),
+          output: asString(values.output),
+          dryRun: asBoolean(values['dry-run']),
+          force: asBoolean(values.force),
+        });
+
+      case 'test':
+        return await runTest({
+          document: positionals[1] ?? '',
+          target: asString(values.target),
+          includeUnsafe: asBoolean(values['include-unsafe']),
+          failOn: parseFailOn(asString(values['fail-on']), ['failure', 'never'] as const),
+          format: asString(values.format)
+            ? (requireFormat(asString(values.format), ['text', 'json', 'junit', 'sarif'], 'text') as
+                | 'text'
+                | 'json'
+                | 'junit'
+                | 'sarif')
+            : undefined,
+          output: asString(values.output),
+          maxCases: asString(values['max-cases']) !== undefined
+            ? parseInteger(asString(values['max-cases']), 0, 'max-cases', 1)
+            : undefined,
+          config: asString(values.config),
+        });
+
       case 'rules': {
         const format = requireFormat(asString(values.format), ['text', 'json'], 'text');
-        process.stdout.write(renderRuleCatalogue(asString(values.category), format as 'text' | 'json'));
+        const loaded = await loadConfig({ explicitPath: asString(values.config) });
+        const plugins = asBoolean(values['no-plugins'])
+          ? []
+          : (await loadPlugins(loaded.config.plugins ?? [])).rules;
+        const extra = loaded.config.strictRules || asBoolean(values.strict) ? STRICT_RULES : [];
+        process.stdout.write(renderRuleCatalogue(asString(values.category), format as 'text' | 'json', [...plugins, ...extra]));
         return 0;
       }
 
-      case 'init':
+      case 'init': {
+        const requestedVersion = asString(values['config-version']);
+        if (requestedVersion !== undefined && requestedVersion !== '1' && requestedVersion !== '2') {
+          throw new UsageError('--config-version must be 1 or 2');
+        }
         return await runInit({
           force: asBoolean(values.force),
           fileName: asString(values.output),
+          configVersion: requestedVersion === '1' ? 1 : 2,
         });
+      }
 
       case 'mcp':
         return await runMcp();

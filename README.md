@@ -44,12 +44,24 @@ Existing tools cover one of these each: schema linters check that the document i
 | Command | Purpose |
 | --- | --- |
 | `apicovenant lint` | Check **43 design-convention rules** that pure schema validators never look at |
+| `apicovenant lint --fix` | Repair the safe, mechanical subset (trailing slashes, 3.1 `nullable`) as a reviewable diff |
 | `apicovenant mock` | Serve a mock API generated from the spec, with realistic deterministic payloads |
 | `apicovenant record` | Put a recording proxy in front of your API and capture traffic as a **golden file** |
 | `apicovenant diff` | Replay the golden file against a live API and report **behaviour drift**, field by field |
+| `apicovenant breaking` | Compare two specs and classify every change as **breaking, risky, compatible or info** |
+| `apicovenant coverage` | Measure recorded traffic against the spec: **unexercised operations, undocumented traffic, status gaps** |
+| `apicovenant test` | Generate contract tests from the spec and validate the responses, with **JUnit** output for CI |
+| `apicovenant migrate` | Migrate a v1 configuration or golden file to the v2 format |
 | `apicovenant rules` | Browse the full rule catalogue |
 | `apicovenant init` | Write a starter configuration file |
 | `apicovenant mcp` | Serve the contract tools to an AI agent over the Model Context Protocol |
+
+Compatibility and coverage have their own guides:
+[docs/breaking.md](docs/breaking.md), [docs/coverage.md](docs/coverage.md),
+[docs/contract-testing.md](docs/contract-testing.md),
+[docs/strict-mock.md](docs/strict-mock.md), [docs/plugins.md](docs/plugins.md),
+[docs/fix.md](docs/fix.md), [docs/openapi-3.1.md](docs/openapi-3.1.md)
+and [docs/migration-1.1.md](docs/migration-1.1.md).
 
 ## Why zero dependencies
 
@@ -124,6 +136,8 @@ actionable — and the same addressing scheme is used by the diff engine.
 ### The rules
 
 43 rules across 8 categories. The full reference lives in [`docs/rules.md`](docs/rules.md).
+Six more opt-in rules ship in the `apicovenant:strict` preset; they never run by
+default, so every existing v1 configuration keeps its current behaviour.
 
 | Category | Rules | What it protects |
 | --- | --- | --- |
@@ -135,6 +149,24 @@ actionable — and the same addressing scheme is used by the diff engine.
 | `schemas` | 7 | Naming consistency, unused components, array items |
 | `security` | 3 | Declared schemes, scopes, no credentials in query strings |
 | `pagination` | 2 | One pagination model, one collection envelope |
+
+Strict mode adds six checks (49 total):
+
+| Rule | Severity | What it catches |
+| --- | --- | --- |
+| `response-204-no-content` | error | A 204 response that still declares a body |
+| `response-201-location` | warn | A 201 without a `Location` header |
+| `schema-example-valid` | error | A component example that fails its own schema |
+| `parameter-example-valid` | error | A parameter example that fails its schema |
+| `request-body-json-content-type` | warn | JSON sent as `text/json` or a vendor JSON type |
+| `security-https` | warn | OAuth/OpenID endpoints served over plain HTTP |
+
+```json
+{ "version": 2, "extends": ["apicovenant:strict"] }
+```
+
+`apicovenant rules --strict` lists all 49. The default `lint` run (and
+`apicovenant:recommended`) stays at 43.
 
 Highlights of what a schema validator will *not* tell you:
 
@@ -150,9 +182,23 @@ Highlights of what a schema validator will *not* tell you:
 ```bash
 apicovenant lint openapi.yaml --format json --output report.json
 apicovenant lint openapi.yaml --format html --output report.html
+
+# re-run on every save (Ctrl+C to stop)
+apicovenant lint openapi.yaml --watch
+
+# preview mechanical fixes as a unified diff, then apply them
+apicovenant lint openapi.yaml --fix
+apicovenant lint openapi.yaml --fix --write
 ```
 
+`--fix` only rewrites the low-risk mechanical findings; semantic rules are
+never touched. `--fix-aggressive` additionally camelCases `operationId`
+values, which can change generated clients. See [docs/fix.md](docs/fix.md).
+
 The HTML report is a **single self-contained file** — no CDN, no external fonts, no scripts from a third party. Attach it to a CI job or commit it to the repository.
+
+Watch mode keeps a report on screen and re-runs after each save; a document that
+fails to parse leaves the previous report visible and the watcher running.
 
 ### Selecting rules
 
@@ -189,7 +235,13 @@ JSON, YAML and an `apicovenant` key in `package.json` are all supported.
 Unknown settings are an **error**, so a typo can never silently disable a
 check. Command line flags always win over the file.
 
-See [docs/configuration.md](docs/configuration.md) for the full reference.
+See [docs/configuration.md](docs/configuration.md) for the full reference of the
+v1 layout and [docs/configuration-v2.md](docs/configuration-v2.md) for the v2
+layout with one section per command.
+
+Configuration can also load local plugins that add lint rules, reporters and
+presets. Plugins run in-process and are not sandboxed; see
+[docs/plugins.md](docs/plugins.md).
 
 ## Baselines
 
@@ -248,6 +300,30 @@ curl 'http://127.0.0.1:4010/users?x-mock-status=404'
 # see the route table
 curl http://127.0.0.1:4010/_apicovenant/routes
 ```
+
+Add `--strict` to validate parameters and request bodies (bad input gets
+`400`, an undocumented media type `415`, an oversized body `413`), `--cors` for
+browser clients and `--watch` to reload the document without a restart. See
+[docs/strict-mock.md](docs/strict-mock.md).
+
+## Contract tests
+
+`apicovenant test` turns the document into a smoke suite: one generated request
+per operation, checked against the documented status, media type and response
+schema.
+
+```console
+$ apicovenant test examples/shop.openapi.yaml
+  ✓ GET /users (listUsers) 27ms
+  ✓ GET /users/{userId} (getUser) 4ms
+  ...
+  0 failed · 7 passed · 3 skipped · 10 total
+```
+
+Without `--target` the cases run against the built-in mock; point them at a
+running API with `--target http://127.0.0.1:8080`. Unsafe methods are skipped
+unless `--include-unsafe` is given, and `--format junit` produces a CI report.
+See [docs/contract-testing.md](docs/contract-testing.md).
 
 ## Recording and diffing
 
@@ -345,6 +421,21 @@ drift.
     npx apicovenant diff --golden traffic.golden.json --target "$API_URL"
 ```
 
+For a complete copy-paste workflow with SARIF upload, JUnit results and a
+breaking-change gate, see [`examples/github-actions.yml`](examples/github-actions.yml).
+The benchmark that tracks the 1.1.0 performance targets is
+`node scripts/bench.mjs` (or `npm run bench`); it is non-blocking in CI and
+exits non-zero with `--check` at the release gate. On a 10.8 MB / 1,000-operation
+document it measures roughly 64 ms parse, 93 ms lint, 35 ms breaking,
+81 ms coverage and 17 ms mock cold start with a 126 MB peak RSS — comfortably
+inside the targets, so no semantic cache layer is needed (and none is added,
+because it would be one more thing to trust, which keeps repeated runs honest).
+
+Five real public specifications (GitHub, Stripe, Slack, Medium and httpbin) can
+be downloaded into the ignored `corpus/specs/` directory with
+`node scripts/fetch-corpus.mjs`; see [`corpus/README.md`](corpus/README.md).
+They are used for local compatibility checks and are never fetched by CI.
+
 On a codebase that is not clean yet, record the existing findings once and
 commit the baseline — from then on the build only fails on new problems.
 
@@ -381,8 +472,9 @@ Point a client at it:
 }
 ```
 
-The agent gets five tools — `lint_openapi`, `list_rules`, `list_operations`,
-`example_response` and `check_contract_drift` — plus the rule reference as a
+The agent gets eight tools — `lint_openapi`, `list_rules`, `list_operations`,
+`example_response`, `check_contract_drift`, `check_breaking_changes`,
+`check_traffic_coverage` and `run_contract_tests` — plus the rule reference as a
 resource. The protocol is implemented directly against the specification, so
 there is **no MCP SDK dependency** and the zero-runtime-dependency promise
 still holds.

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 
 import { readTextFile } from '../util/fs.ts';
 import { isPlainObject } from '../util/text.ts';
@@ -101,6 +102,13 @@ export async function bundleExternalRefs(root: unknown, documentPath: string): P
   const loadFile = async (filePath: string): Promise<unknown> => {
     const cached = files.get(filePath);
     if (cached !== undefined) return cached;
+    const info = await stat(filePath).catch(() => undefined);
+    if (!info) {
+      throw new ExternalRefError(`referenced file does not exist: ${filePath}`, filePath, documentPath);
+    }
+    if (info.size > 20 * 1024 * 1024) {
+      throw new ExternalRefError(`referenced file exceeds the 20 MB limit: ${filePath}`, filePath, documentPath);
+    }
     let text: string;
     try {
       text = await readTextFile(filePath);

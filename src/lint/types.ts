@@ -45,6 +45,9 @@ export interface RuleDefinition {
 
   keywords?: string[];
 
+  /** The plugin file that contributed the rule; absent for built-in rules. */
+  source?: string;
+
   check(context: RuleContext): void;
 }
 
@@ -55,6 +58,15 @@ export interface LintOptions {
   ignore?: string[];
 
   minSeverity?: Severity;
+
+  /** Rule id → level. "off" removes the rule, the rest override its severity. */
+  ruleLevels?: Record<string, 'off' | Severity>;
+
+  /** Rules contributed by plugins. */
+  extraRules?: RuleDefinition[];
+
+  /** Warn about OpenAPI 3.1 keywords this build does not evaluate. */
+  strictSchema?: boolean;
 }
 
 export interface LintResult {

@@ -1,7 +1,14 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { createGoldenFile, type GoldenFile, type GoldenInteraction, type QueryParams } from './golden.ts';
+import {
+  createGoldenFile,
+  encodeBody,
+  type GoldenFile,
+  type GoldenInteraction,
+  type MultiValue,
+  valuesOf,
+} from './golden.ts';
 
 export interface RecorderOptions {
 
@@ -20,6 +27,12 @@ export interface RecorderOptions {
   onComplete?: () => void;
 
   redactHeaders?: string[];
+
+  /** Extra header names to redact on top of the defaults. */
+  redactHeaderNames?: string[];
+
+  /** Extra query parameter names to redact on top of the defaults. */
+  redactQueryNames?: string[];
 }
 
 export interface RecorderHandle {
@@ -46,19 +59,25 @@ const DEFAULT_REDACT = [
 // keys have no canonical casing, so we match on the word itself.
 const SENSITIVE_QUERY_KEY = /(api[-_]?key|apikey|access[-_]?token|token|secret|password|passwd|credential|authorization)/i;
 
-const redactQuery = (query: QueryParams): QueryParams => {
-  const out: QueryParams = {};
+const redactQuery = (
+  query: Record<string, MultiValue>,
+  extraNames: Set<string>,
+): Record<string, MultiValue> => {
+  const out: Record<string, MultiValue> = {};
   for (const [name, value] of Object.entries(query)) {
-    out[name] = SENSITIVE_QUERY_KEY.test(name) ? '<redacted>' : value;
+    out[name] = extraNames.has(name.toLowerCase()) || SENSITIVE_QUERY_KEY.test(name) ? '<redacted>' : value;
   }
   return out;
 };
 
-// Object.fromEntries(searchParams) keeps only the last value of a repeated
-// key ("?tag=a&tag=b"), so the golden could not reproduce the request.
-const collectQuery = (searchParams: URLSearchParams): QueryParams => {
-  const out: QueryParams = {};
-  for (const [name, value] of searchParams) {
+/**
+ * URLSearchParams drops nothing, but Object.fromEntries keeps only the last
+ * value of a repeated key. Collect every pair so that ?tag=a&tag=b survives
+ * a round trip through the golden file.
+ */
+const collectQuery = (url: URL): Record<string, MultiValue> => {
+  const out: Record<string, MultiValue> = {};
+  for (const [name, value] of url.searchParams.entries()) {
     const existing = out[name];
     if (existing === undefined) out[name] = value;
     else if (Array.isArray(existing)) existing.push(value);
@@ -67,11 +86,32 @@ const collectQuery = (searchParams: URLSearchParams): QueryParams => {
   return out;
 };
 
+const redactResponseHeaders = (
+  headers: Record<string, MultiValue>,
+  redacted: Set<string>,
+): Record<string, MultiValue> => {
+  const out: Record<string, MultiValue> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (!redacted.has(lower)) {
+      out[lower] = value;
+    } else {
+      out[lower] = Array.isArray(value) ? value.map(() => '<redacted>') : '<redacted>';
+    }
+  }
+  return out;
+};
+
 export async function startRecorder(options: RecorderOptions): Promise<RecorderHandle> {
   const target = options.target.replace(/\/+$/, '');
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 0;
-  const redact = new Set((options.redactHeaders ?? DEFAULT_REDACT).map((name) => name.toLowerCase()));
+  const redact = new Set(
+    [...(options.redactHeaders ?? DEFAULT_REDACT), ...(options.redactHeaderNames ?? [])].map((name) =>
+      name.toLowerCase(),
+    ),
+  );
+  const redactQueryNames = new Set((options.redactQueryNames ?? []).map((name) => name.toLowerCase()));
 
   const file = createGoldenFile(target, options.spec);
   let captured = 0;
@@ -117,7 +157,11 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       const started = Date.now();
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk as Buffer);
-      const requestBody = Buffer.concat(chunks).toString('utf8');
+      // Keep the request body as bytes. Converting to a string and back
+      // rewrites every byte that is not valid UTF-8 (0x89 becomes EF BF BD),
+      // which corrupts uploads, protobuf and multipart payloads.
+      const requestBody = Buffer.concat(chunks);
+      const encodedRequest = encodeBody(requestBody);
 
       const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
       const targetUrl = `${target}${request.url ?? '/'}`;
@@ -136,7 +180,9 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
         upstream = await fetch(targetUrl, {
           method: request.method ?? 'GET',
           headers: forwardHeaders(request.headers),
-          body: ['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase()) ? undefined : requestBody,
+          body: ['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase())
+            ? undefined
+            : new Uint8Array(requestBody),
           redirect: 'manual',
           signal: controller.signal,
         });
@@ -149,20 +195,37 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
         return;
       }
 
-      const responseHeaders: Record<string, string> = {};
+      // Headers.forEach() joins repeated Set-Cookie headers with a comma,
+      // which is not a valid way to represent cookies in a single header.
+      const setCookies = upstream.headers.getSetCookie();
+      const responseHeaders: Record<string, MultiValue> = {};
       upstream.headers.forEach((value, name) => {
-        responseHeaders[name.toLowerCase()] = value;
+        const lower = name.toLowerCase();
+        if (lower === 'set-cookie') return;
+        responseHeaders[lower] = value;
       });
+      if (setCookies.length === 1) responseHeaders['set-cookie'] = setCookies[0] as string;
+      else if (setCookies.length > 1) responseHeaders['set-cookie'] = setCookies;
 
       const outHeaders: Record<string, string | string[]> = {};
       upstream.headers.forEach((value, name) => {
         const lower = name.toLowerCase();
         // fetch() already decompressed the body, so the upstream framing
         // headers describe a different byte stream than the one we forward.
-        // Drop them and let Node re-frame the response.
-        if (lower === 'content-encoding' || lower === 'content-length' || lower === 'transfer-encoding') return;
+        // Drop them and let Node re-frame the response. Set-Cookie is added
+        // separately so that each cookie keeps its own header line.
+        if (
+          lower === 'set-cookie' ||
+          lower === 'content-encoding' ||
+          lower === 'content-length' ||
+          lower === 'transfer-encoding'
+        ) {
+          return;
+        }
         outHeaders[name] = value;
       });
+      if (setCookies.length === 1) outHeaders['set-cookie'] = setCookies[0] as string;
+      else if (setCookies.length > 1) outHeaders['set-cookie'] = setCookies;
 
       // Forward bytes as they arrive instead of buffering the complete
       // response. `await upstream.text()` blocked streaming endpoints
@@ -190,20 +253,30 @@ export async function startRecorder(options: RecorderOptions): Promise<RecorderH
       }
       if (!response.writableEnded && !response.destroyed) response.end();
 
-      const responseBody = Buffer.concat(responseChunks).toString('utf8');
-      const contentType = responseHeaders['content-type'] ?? '';
+      const encodedResponse = encodeBody(Buffer.concat(responseChunks));
+      const responseBody = encodedResponse.body;
+      const contentType = valuesOf(responseHeaders['content-type']).join(', ');
       const bodyType: GoldenInteraction['bodyType'] =
-        responseBody.trim() === '' ? 'empty' : contentType.includes('json') ? 'json' : 'text';
+        encodedResponse.encoding === 'base64'
+          ? 'binary'
+          : responseBody.trim() === ''
+            ? 'empty'
+            : contentType.includes('json')
+              ? 'json'
+              : 'text';
 
       const interaction: GoldenInteraction = {
         method: (request.method ?? 'GET').toUpperCase(),
         path: requestUrl.pathname,
-        query: redactQuery(collectQuery(requestUrl.searchParams)),
+        query: redactQuery(collectQuery(requestUrl), redactQueryNames),
         requestHeaders: redactHeaders(request.headers),
         status: upstream.status,
-        responseHeaders: redactHeaders(responseHeaders),
+        responseHeaders: redactResponseHeaders(responseHeaders, redact),
         body: responseBody,
         bodyType,
+        ...(encodedResponse.encoding === 'base64' ? { bodyEncoding: 'base64' as const } : {}),
+        requestBody: encodedRequest.body,
+        ...(encodedRequest.encoding === 'base64' ? { requestBodyEncoding: 'base64' as const } : {}),
         durationMs: Date.now() - started,
       };
 

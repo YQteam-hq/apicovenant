@@ -105,7 +105,16 @@ test('tools/list announces every tool with an input schema', async () => {
 
   assert.deepEqual(
     tools.map((tool) => tool['name']).sort(),
-    ['check_contract_drift', 'example_response', 'lint_openapi', 'list_operations', 'list_rules'],
+    [
+      'check_breaking_changes',
+      'check_contract_drift',
+      'check_traffic_coverage',
+      'example_response',
+      'lint_openapi',
+      'list_operations',
+      'list_rules',
+      'run_contract_tests',
+    ],
   );
   for (const tool of tools) {
     assert.equal(tool['inputSchema'].type, 'object');
@@ -263,6 +272,24 @@ test('list_rules can be filtered by category', async () => {
   assert.equal(structured['total'], 2);
   const rules = structured['rules'] as Array<Record<string, any>>;
   assert.ok(rules.every((rule) => rule['category'] === 'pagination'));
+});
+
+test('run_contract_tests generates cases and reports a summary', async () => {
+  const response = await driveOne(
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'run_contract_tests', arguments: { spec: 'examples/shop.openapi.yaml' } },
+    },
+  );
+
+  const result = response.result as Record<string, any>;
+  assert.equal(result['isError'], undefined);
+  const structured = result['structuredContent'] as Record<string, any>;
+  assert.ok(structured['summary'].total > 0);
+  assert.equal(structured['summary'].failed, 0);
+  assert.match(result['content'][0].text, /passed/);
 });
 
 test('an unknown tool is a tool error, not a crash', async () => {

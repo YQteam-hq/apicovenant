@@ -3,6 +3,9 @@ import { isPlainObject } from '../util/text.ts';
 export interface DerefOptions {
 
   maxDepth?: number;
+
+  /** Resolve only a top-level reference and leave nested values untouched. */
+  shallow?: boolean;
 }
 
 export function resolveLocalRef(doc: unknown, ref: string): unknown {
@@ -43,6 +46,12 @@ export function isRefNode(node: unknown): node is { $ref: string } {
   return isPlainObject(node) && typeof node['$ref'] === 'string';
 }
 
+function dynamicRefOf(node: unknown): string | undefined {
+  if (!isPlainObject(node)) return undefined;
+  const value = node['$dynamicRef'];
+  return typeof value === 'string' ? value : undefined;
+}
+
 export function deref(doc: unknown, node: unknown, options: DerefOptions = {}): unknown {
   const maxDepth = options.maxDepth ?? 40;
   const seen = new Set<string>();
@@ -50,16 +59,26 @@ export function deref(doc: unknown, node: unknown, options: DerefOptions = {}): 
   const walk = (current: unknown, depth: number): unknown => {
     if (depth > maxDepth) return current;
 
-    if (isRefNode(current)) {
-      if (seen.has(current.$ref)) return current;
-      const resolved = resolveLocalRef(doc, current.$ref);
+    const ref = isRefNode(current) ? current.$ref : dynamicRefOf(current);
+    if (ref !== undefined) {
+      if (seen.has(ref)) return current;
+      let resolved: unknown;
+      try {
+        resolved = resolveLocalRef(doc, ref);
+      } catch {
+        // "$dynamicRef": "#anchor" is a dynamic anchor, not a JSON Pointer;
+        // without the caller's dynamic scope it cannot be resolved safely.
+        return current;
+      }
       if (resolved === undefined) return current;
-      seen.add(current.$ref);
+      if (options.shallow) return resolved;
+      seen.add(ref);
       const expanded = walk(resolved, depth + 1);
-      seen.delete(current.$ref);
+      seen.delete(ref);
       return expanded;
     }
 
+    if (options.shallow) return current;
     if (Array.isArray(current)) return current.map((item) => walk(item, depth + 1));
 
     if (isPlainObject(current)) {

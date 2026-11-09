@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 
 import { parseYaml, YamlError } from '../yaml/parser.ts';
 import { isPlainObject } from '../util/text.ts';
@@ -22,6 +23,14 @@ export interface LoadOptions {
   document?: string;
 
   format?: 'yaml' | 'json';
+}
+
+const MAX_SPEC_BYTES = 20 * 1024 * 1024;
+
+function assertSpecSize(text: string, document: string): void {
+  if (Buffer.byteLength(text, 'utf8') > MAX_SPEC_BYTES) {
+    throw new SpecError(`document exceeds the ${MAX_SPEC_BYTES / (1024 * 1024)} MB limit`, document);
+  }
 }
 
 export function parseDocument(text: string, options: LoadOptions = {}): unknown {
@@ -97,6 +106,7 @@ function validateRefs(doc: unknown, file = ''): void {
 }
 
 export function loadSpecFromText(text: string, options: LoadOptions = {}): ApiSpec {
+  assertSpecSize(text, options.document ?? '<memory>');
   const doc = parseDocument(text, options);
   validateDocument(doc, options.document ?? '');
   validateRefs(doc, options.document ?? '');
@@ -104,7 +114,13 @@ export function loadSpecFromText(text: string, options: LoadOptions = {}): ApiSp
 }
 
 export async function loadSpecFile(filePath: string): Promise<ApiSpec> {
+  // Reject an oversized file before reading it into memory.
+  const info = await stat(filePath);
+  if (info.size > MAX_SPEC_BYTES) {
+    throw new SpecError(`document exceeds the ${MAX_SPEC_BYTES / (1024 * 1024)} MB limit`, filePath);
+  }
   const text = await readTextFile(filePath);
+  assertSpecSize(text, filePath);
   const doc = parseDocument(text, { document: filePath });
   validateDocument(doc, filePath);
 

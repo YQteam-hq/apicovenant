@@ -44,9 +44,14 @@
 | 命令 | 作用 |
 | --- | --- |
 | `apicovenant lint` | 检查 **43 条设计约定规则**，这些规则是纯 schema 校验器根本不会看的 |
+| `apicovenant lint --fix` | 以可审阅的 diff 修复机械问题（末尾斜杠、3.1 `nullable`） |
 | `apicovenant mock` | 基于规范起一个 mock 服务，响应体真实且可复现 |
 | `apicovenant record` | 在你的 API 前面放一个录制代理，把真实流量存成 **golden 文件** |
 | `apicovenant diff` | 重放 golden 文件，逐字段报告**行为漂移** |
+| `apicovenant breaking` | 比较两份规范，按 41 类变更判定 breaking / risky |
+| `apicovenant coverage` | 用 golden 流量找出未覆盖、未文档化的接口路径 |
+| `apicovenant test` | 从规范生成契约测试，内置 mock 或直连真实服务 |
+| `apicovenant migrate` | 迁移 v1 配置和 golden 文件到 1.1 格式 |
 | `apicovenant rules` | 浏览完整规则目录 |
 | `apicovenant init` | 生成一份初始配置文件 |
 | `apicovenant mcp` | 通过 Model Context Protocol 把契约工具交给 AI agent |
@@ -97,6 +102,31 @@ apicovenant record --target http://localhost:3000 --out traffic.golden.json
 apicovenant diff --golden traffic.golden.json --target http://localhost:3000
 ```
 
+## 契约生命周期（1.1）
+
+1.1 把工具从「检查一份 OpenAPI」扩展到契约的整个生命周期：
+
+```bash
+# 兼容性门禁：与基线规范比较
+apicovenant breaking --base baseline.yaml --head openapi.yaml --fail-on breaking
+
+# 覆盖率：录制流量覆盖了哪些 operation
+apicovenant coverage --golden traffic.golden.json --spec openapi.yaml --min 80
+
+# 契约测试：默认使用内置 mock，也可指向真实环境
+apicovenant test openapi.yaml --format junit --output contract.xml
+apicovenant test openapi.yaml --target http://127.0.0.1:8080 --include-unsafe
+
+# 从 1.0 配置和 golden 文件迁移
+apicovenant migrate --config .apicovenantrc.json --dry-run
+```
+
+完整说明见 [`docs/breaking.md`](docs/breaking.md)、[`docs/coverage.md`](docs/coverage.md)、
+[`docs/test.md`](docs/test.md) 和 [`docs/migration-1.1.md`](docs/migration-1.1.md)。
+配置 v2、strict mock、插件和 OpenAPI 3.1 支持见
+[`docs/configuration-v2.md`](docs/configuration-v2.md)、[`docs/strict-mock.md`](docs/strict-mock.md)、
+[`docs/plugins.md`](docs/plugins.md) 和 [`docs/openapi-3.1.md`](docs/openapi-3.1.md)。
+
 ## Lint：设计约定检查
 
 ```console
@@ -123,6 +153,10 @@ GET /stock_items
 ### 规则清单
 
 8 个分类共 43 条规则，完整说明见 [`docs/rules.md`](docs/rules.md)。
+另有 6 条 opt-in strict 规则，通过 `extends: ["apicovenant:strict"]` 启用，
+默认运行和 `apicovenant:recommended` 仍是 43 条；`apicovenant rules --strict`
+可查看全部 49 条。`lint --fix`、OpenAPI 3.1 关键字和基准说明分别见
+[`docs/fix.md`](docs/fix.md) 与 [`docs/openapi-3.1.md`](docs/openapi-3.1.md)。
 
 | 分类 | 规则数 | 保护什么 |
 | --- | --- | --- |
@@ -366,8 +400,9 @@ apicovenant mcp
 }
 ```
 
-agent 会拿到五个工具 —— `lint_openapi`、`list_rules`、`list_operations`、
-`example_response`、`check_contract_drift` —— 以及作为 resource 的规则手册。
+agent 会拿到八个工具 —— `lint_openapi`、`list_rules`、`list_operations`、
+`example_response`、`check_contract_drift`、`check_breaking_changes`、
+`check_traffic_coverage`、`run_contract_tests` —— 以及作为 resource 的规则手册。
 协议是直接照规范实现的，**不引入任何 MCP SDK 依赖**，零运行时依赖的承诺依然成立。
 
 各编辑器的客户端配置和完整工具说明见 [docs/mcp.md](docs/mcp.md)。

@@ -45,8 +45,10 @@ test('init writes a configuration file', async () => {
   const configPath = path.join(dir, 'apicovenant.config.json');
   assert.ok(fs.existsSync(configPath));
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-  assert.equal(config['failOn'], 'error');
-  assert.equal(config['format'], 'text');
+  assert.equal(config['version'], 2);
+  const lint = config['lint'] as Record<string, unknown>;
+  assert.equal(lint['failOn'], 'error');
+  assert.deepEqual(config['extends'], ['apicovenant:recommended']);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

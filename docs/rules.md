@@ -344,3 +344,18 @@ UserPage:
     total:
       type: integer
 ```
+
+## strict (opt-in)
+
+The six rules below are **not** part of the default 43-rule set. They are enabled
+only by `extends: ["apicovenant:strict"]` (or `apicovenant rules --strict`), so
+upgrading never changes an existing v1 result.
+
+| Rule | Severity | What it checks |
+| --- | --- | --- |
+| `response-204-no-content` | error | A 204 response must not declare `content`. |
+| `response-201-location` | warn | A 201 response should document a `Location` header. |
+| `schema-example-valid` | error | A component schema's `example` must pass that schema. |
+| `parameter-example-valid` | error | A parameter `example` must pass its schema. |
+| `request-body-json-content-type` | warn | A JSON request body should use `application/json`. |
+| `security-https` | warn | OAuth/OpenID endpoints must not use plain HTTP. |

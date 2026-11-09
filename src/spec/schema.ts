@@ -9,6 +9,14 @@ export interface JsonSchema {
   properties?: Record<string, JsonSchema>;
   required?: string[];
   additionalProperties?: boolean | JsonSchema;
+  unevaluatedProperties?: boolean | JsonSchema;
+  dependentRequired?: Record<string, string[]>;
+  dependentSchemas?: Record<string, JsonSchema>;
+  if?: JsonSchema;
+  then?: JsonSchema;
+  else?: JsonSchema;
+  $dynamicRef?: string;
+  $recursiveRef?: string;
   items?: JsonSchema;
   prefixItems?: JsonSchema[];
   enum?: unknown[];
@@ -74,6 +82,38 @@ function typeNames(schema: JsonSchema): string[] {
 function matchesType(value: unknown, names: string[]): boolean {
   if (names.length === 0) return true;
   return names.some((name) => TYPE_CHECKS[name]?.(value) ?? true);
+}
+
+/** Property names a schema may evaluate, including composition branches. */
+function declaredPropertyNames(schema: JsonSchema, seen: Set<unknown> = new Set()): Set<string> {
+  const names = new Set<string>();
+  if (seen.has(schema)) return names;
+  seen.add(schema);
+
+  if (isPlainObject(schema.properties)) {
+    for (const key of Object.keys(schema.properties)) names.add(key);
+  }
+  for (const branch of ['allOf', 'anyOf', 'oneOf'] as const) {
+    const list = schema[branch];
+    if (!Array.isArray(list)) continue;
+    for (const sub of list) {
+      if (!isPlainObject(sub)) continue;
+      for (const name of declaredPropertyNames(sub as JsonSchema, seen)) names.add(name);
+    }
+  }
+  for (const branch of ['if', 'then', 'else'] as const) {
+    const sub = schema[branch];
+    if (isPlainObject(sub)) {
+      for (const name of declaredPropertyNames(sub as JsonSchema, seen)) names.add(name);
+    }
+  }
+  if (isPlainObject(schema.dependentSchemas)) {
+    for (const sub of Object.values(schema.dependentSchemas)) {
+      if (!isPlainObject(sub)) continue;
+      for (const name of declaredPropertyNames(sub as JsonSchema, seen)) names.add(name);
+    }
+  }
+  return names;
 }
 
 export function validateSchema(value: unknown, schema: unknown, options: ValidateOptions = {}): SchemaViolation[] {
@@ -198,10 +238,55 @@ export function validateSchema(value: unknown, schema: unknown, options: Validat
           message: `expected at most ${s.maxProperties} properties`,
         });
       }
+
+      if (s.dependentRequired !== undefined && isPlainObject(s.dependentRequired)) {
+        for (const [key, required] of Object.entries(s.dependentRequired)) {
+          if (!(key in val) || !Array.isArray(required)) continue;
+          for (const dependent of required) {
+            if (typeof dependent !== 'string' || dependent in val) continue;
+            violations.push({
+              path: `${path}/${dependent}`,
+              schemaPath: `${schemaPath}/dependentRequired/${key}`,
+              message: `property "${dependent}" is required when "${key}" is present`,
+            });
+          }
+        }
+      }
+
+      if (s.dependentSchemas !== undefined && isPlainObject(s.dependentSchemas)) {
+        for (const [key, dependentSchema] of Object.entries(s.dependentSchemas)) {
+          if (key in val) visit(val, dependentSchema, path, `${schemaPath}/dependentSchemas/${key}`);
+        }
+      }
+
+      // JSON Schema 2020-12: unevaluatedProperties only sees properties that
+      // were not evaluated by properties/additionalProperties or by a
+      // composition branch.
+      if (s.unevaluatedProperties !== undefined && s.additionalProperties === undefined) {
+        const evaluated = declaredPropertyNames(s);
+        for (const [key, child] of Object.entries(val)) {
+          if (evaluated.has(key)) continue;
+          if (s.unevaluatedProperties === false) {
+            violations.push({
+              path: `${path}/${key}`,
+              schemaPath: `${schemaPath}/unevaluatedProperties`,
+              message: `unevaluated property "${key}" is not allowed`,
+            });
+          } else if (isPlainObject(s.unevaluatedProperties)) {
+            visit(child, s.unevaluatedProperties, `${path}/${key}`, `${schemaPath}/unevaluatedProperties`);
+          }
+        }
+      }
     }
 
     if (Array.isArray(s.allOf)) {
       s.allOf.forEach((sub, index) => visit(val, sub, path, `${schemaPath}/allOf/${index}`));
+    }
+
+    if (s.if !== undefined) {
+      const matches = validateSchema(val, s.if, { maxErrors: 1 }).length === 0;
+      if (matches && s.then !== undefined) visit(val, s.then, path, `${schemaPath}/then`);
+      else if (!matches && s.else !== undefined) visit(val, s.else, path, `${schemaPath}/else`);
     }
 
     if (Array.isArray(s.anyOf) && s.anyOf.length > 0) {

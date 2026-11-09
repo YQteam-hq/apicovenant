@@ -1,0 +1,32 @@
+[
+  {
+    "name": "github.openapi.json",
+    "provider": "github.com",
+    "version": "1.1.4",
+    "url": "https://api.apis.guru/v2/specs/github.com/1.1.4/openapi.json"
+  },
+  {
+    "name": "stripe.openapi.json",
+    "provider": "stripe.com",
+    "version": "2022-11-15",
+    "url": "https://api.apis.guru/v2/specs/stripe.com/2022-11-15/openapi.json"
+  },
+  {
+    "name": "slack.openapi.json",
+    "provider": "slack.com",
+    "version": "1.7.0",
+    "url": "https://api.apis.guru/v2/specs/slack.com/1.7.0/openapi.json"
+  },
+  {
+    "name": "medium.openapi.json",
+    "provider": "medium.com",
+    "version": "1.0",
+    "url": "https://api.apis.guru/v2/specs/medium.com/1.0/openapi.json"
+  },
+  {
+    "name": "httpbin.openapi.json",
+    "provider": "httpbin.org",
+    "version": "0.9.2",
+    "url": "https://api.apis.guru/v2/specs/httpbin.org/0.9.2/openapi.json"
+  }
+]
