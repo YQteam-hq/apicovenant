@@ -11,7 +11,7 @@ says so.
 
 ## [Unreleased]
 
-## [1.1.0] — 2026-11-07
+## [1.1.0] — 2026-11-10
 
 **Contract compatibility, coverage and a v2 configuration.** This release turns
 the linter into a contract lifecycle tool: two documents can be compared for
