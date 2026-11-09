@@ -92,6 +92,9 @@ async function main() {
   if (state?.setup) {
     say(`  setup problem: ${state.setup.code ?? ''} ${state.setup.detail ?? ''}`.trimEnd());
   }
+  if (state?.paused === true) {
+    say('  the service is paused; the agent takes no work until it is resumed');
+  }
 
   const settings = await call('GET', 'settings');
 
@@ -110,6 +113,10 @@ async function main() {
     config: {
       [repoKey]: wanted.source.config.repository,
       [cliKey]: expand(wanted.source.config.agentCli),
+      observeIssues: wanted.source.config.observeIssues,
+      observePulls: wanted.source.config.observePulls,
+      observeComments: wanted.source.config.observeComments,
+      observeCi: wanted.source.config.observeCi,
     },
   });
   const sourceRevision = github.revision;
@@ -118,6 +125,7 @@ async function main() {
     revision: sourceRevision,
   });
   say(`source ${github.id}: repository=${wanted.source.config.repository}, cli=${expand(wanted.source.config.agentCli)} (revision ${saved.revision ?? sourceRevision})`);
+  say(`  observing: issues=${wanted.source.config.observeIssues} pulls=${wanted.source.config.observePulls} comments=${wanted.source.config.observeComments} ci=${wanted.source.config.observeCi}`);
 
   // ---------------------------------------------------------------- policy
   const policyBlock = settings.blocks?.policy;
@@ -126,12 +134,24 @@ async function main() {
     return;
   }
   const policyValue = merge(policyBlock.value ?? {}, {
+    rules: wanted.policy.rules,
     sources: {
       [github.id]: merge(policyBlock.value?.sources?.[github.id] ?? {}, wanted.policy.sources.github),
     },
   });
   saved = await call('PUT', 'settings/policy', { value: policyValue, revision: policyBlock.revision });
-  say(`policy: allowed = ${wanted.policy.sources.github.allowed.map((entry) => entry.id).join(', ')} (revision ${saved.revision ?? policyBlock.revision})`);
+  say(`policy: rules = ${wanted.policy.rules.map((rule) => rule.id).join(', ')} (revision ${saved.revision ?? policyBlock.revision})`);
+  say(`  allowed = ${wanted.policy.sources.github.allowed.map((entry) => entry.id).join(', ')}`);
+
+  // ------------------------------------------------------------------ eval
+  const evalBlock = settings.blocks?.eval;
+  if (evalBlock) {
+    const evalValue = merge(evalBlock.value ?? {}, wanted.eval);
+    saved = await call('PUT', 'settings/eval', { value: evalValue, revision: evalBlock.revision });
+    say(`eval: mode=${wanted.eval.mode}, timeout=${wanted.eval.timeoutSeconds}s (revision ${saved.revision ?? evalBlock.revision})`);
+  } else {
+    fail('the eval block is not exposed by this version - set the accept mode to "auto" by hand');
+  }
 
   // -------------------------------------------------------------- executor
   const executorBlock = settings.blocks?.executor;
@@ -144,15 +164,23 @@ async function main() {
   }
 
   // --------------------------------------------------------------- prompts
-  const promptsBlock = settings.blocks?.prompts;
-  if (promptsBlock) {
-    const promptsValue = merge(promptsBlock.value ?? {}, wanted.prompts);
-    saved = await call('PUT', 'settings/prompts', { value: promptsValue, revision: promptsBlock.revision });
-    say(`prompts: commit author=${wanted.prompts.team.delivery.commitAuthor}, auto-merge=${wanted.prompts.team.delivery.autoMerge} (revision ${saved.revision ?? promptsBlock.revision})`);
-  } else {
-    say('prompts: this version does not expose the block through the API.');
-    say(`  set the commit author to ${wanted.prompts.team.delivery.commitAuthor} and`);
-    say('  keep the auto-merge condition at "never" in the team delivery prompts.');
+  try {
+    const promptState = await call('GET', 'prompts');
+    const current = promptState.current ?? promptState;
+    const baseRevision = current.revision ?? promptState.revision;
+    const config = current.config ?? {};
+    const promptValue = {
+      ...config,
+      communication: wanted.prompts.communication,
+      scope: wanted.prompts.scope,
+      delivery: wanted.prompts.delivery,
+      skills: merge(config.skills ?? {}, wanted.prompts.skills ?? {}),
+    };
+    saved = await call('PUT', 'prompts', { config: promptValue, baseRevision });
+    say(`prompts: communication, scope, delivery and ${Object.keys(wanted.prompts.skills ?? {}).length} team skill(s) (revision ${saved.revision ?? baseRevision})`);
+  } catch (error) {
+    fail(`the team sections were not written: ${error.message}`);
+    fail('set them by hand on the panel: Communication, Ticket scope, Delivery requirements');
   }
 
   say('');
