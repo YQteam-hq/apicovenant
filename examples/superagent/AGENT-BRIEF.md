@@ -73,11 +73,11 @@ and never pasted into a chat.
    when the profile does not exist yet: on an existing profile it replaces it
    and deletes its `cordis.patch.yml`, machine configuration included.
 
-3. **This repository's configuration.** Clone it and take the branch that
-   holds the configuration:
+3. **This repository's configuration.** Clone it; the configuration is on the
+   default branch:
 
    ```sh
-   git clone -b feat/dsh-superagent https://github.com/YQteam-hq/apicovenant.git ~/src/apicovenant
+   git clone https://github.com/YQteam-hq/apicovenant.git ~/src/apicovenant
    cd ~/src/apicovenant
    ```
 
@@ -136,6 +136,50 @@ its own worktree on an `agent/` branch and answers in that thread.
 
 A mention added by editing an existing issue body does **not** arrive. Post
 a new comment instead.
+
+## If a request does not arrive
+
+Check these in order, and report what you found. Do not ask the human for a
+secret, and do not change a decision from the table above to make a check pass.
+
+1. **The service runs.**
+
+   ```sh
+   DSH_SUPERAGENT_HOME=~/dsh-superagent node scripts/superagent.mjs status
+   ```
+
+   Exit 0 means it runs. Exit 1 means it does not run, runs twice, does not
+   answer, or the runtime reports an error - the output names the reason.
+   Exit 2 means a Source or a Policy sync reports an error and `errors` names
+   each part. Exit 3 means setup waits, and `setup` says what is missing.
+
+2. **The agent CLI reads its own account.**
+
+   ```sh
+   ~/.local/bin/gh-agent api user --jq .login   # must print YQteam-Iris
+   ```
+
+   The wrapper must be signed in, and it must not read the operator's
+   account.
+
+3. **The sender is on the allowed list.** The panel shows it on the Policy
+   card: `policy.sources.github.allowed` must contain `YQteam-dyq` and
+   `YQteam-Theodore`. Re-run `apply-settings.mjs` when it does not.
+
+4. **The request was a new comment** that mentions `YQteam-Iris`. A mention
+   added by editing an issue body is never received.
+
+5. **Processing is not paused.** The panel shows it; `POST executor/pause`
+   sets it, and the settings page clears it.
+
+6. **The log explains the rest.**
+
+   ```sh
+   ls -t ~/dsh-superagent/.artifacts/*.log ~/.dsh/profiles/superagent/.artifacts/*.log 2>/dev/null | head -3
+   ```
+
+   Read the newest one. The troubleshooting table in `docs/006-deployment.md`
+   of the bundle checkout maps each message to its fix.
 
 ## If a save is refused
 

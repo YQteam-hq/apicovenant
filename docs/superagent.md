@@ -162,7 +162,7 @@ Management API of the panel, which runs on `127.0.0.1:<port>`:
 | Block | What it holds for this repository |
 | --- | --- |
 | `sources` | The GitHub source: repository `YQteam-hq/apicovenant`, agent CLI `~/.local/bin/gh-agent`. |
-| `policy` | The allowed senders: `YQteam-dyq`. Until a list has someone, no request can become a Ticket. |
+| `policy` | The allowed senders: `YQteam-dyq` and `YQteam-Theodore`. Until a list has someone, no request can become a Ticket. |
 | `executor` | The directory root (`~/src/apicovenant`) and the prepare command that gives each Ticket a worktree. |
 | prompts | The team sections: the GitHub disclosure line, the commit author and the auto-merge condition. |
 
@@ -228,6 +228,63 @@ post a new comment instead.
 
 ---
 
+## When a request does not arrive
+
+The agent reads the notifications of its own account, and it polls them once a
+minute. A request therefore arrives only when all of these hold at the same
+time: the service runs, the sender is on the allowed list, the Source is on,
+processing is not paused, and the request is a **new comment** that mentions
+the agent account. Check them in this order.
+
+1. **The service runs.**
+
+   ```sh
+   scripts/dsh-superagent status
+   ```
+
+   Exit 0 means it runs. Exit 1 means it does not run, runs twice, does not
+   answer, or the runtime reports an error - the output names the reason.
+   Exit 2 means a Source or a Policy sync reports an error, and `errors` names
+   each part. Exit 3 means setup waits, and `setup` says what is missing.
+
+2. **The agent CLI reads its own account.**
+
+   ```sh
+   ~/.local/bin/gh-agent api user --jq .login    # must print YQteam-Iris
+   ```
+
+   The wrapper must be signed in, and it must never read the operator's
+   account. A wrapper that is not signed in makes the Source sync fail, and
+   the symptom is that no request is ever seen.
+
+3. **The sender is on the allowed list.** The panel shows it on the Policy
+   card: `policy.sources.github.allowed` holds GitHub accounts as
+   `[{"id": "<login>"}]`, and it must contain `YQteam-dyq` and
+   `YQteam-Theodore`. A request from anyone else is dropped silently.
+
+4. **The request was a new comment.** Editing an issue body to add a mention
+   is not received. Post a new comment that mentions `YQteam-Iris`.
+
+5. **Processing is not paused.** The panel shows it; `POST executor/pause`
+   sets it, and the settings page clears it.
+
+6. **The log explains the rest.**
+
+   ```sh
+   ls -t ~/dsh-superagent/.artifacts/*.log ~/.dsh/profiles/superagent/.artifacts/*.log 2>/dev/null | head -3
+   ```
+
+   Each profile keeps its logs under `.artifacts/`, named
+   `dsh-superagent-<profile>-<date>-<time>-<pid>.log`. The troubleshooting
+   table in the upstream
+   [006 Deployment](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/006-deployment.md#troubleshooting)
+   maps every message to its fix.
+
+A request that is refused is not lost: the panel lists it, and the overview
+links to the setting that would let it through.
+
+---
+
 ## Stopping it
 
 ```sh
@@ -248,8 +305,8 @@ requests it opened.
 
 - It writes **under `YQteam-Iris`**. Every comment and pull request carries
   that name, not the operator's.
-- It acts **only for `YQteam-dyq`**, until the allowed list is widened on
-  purpose.
+- It acts **only for `YQteam-dyq` and `YQteam-Theodore`**, until the allowed
+  list is widened on purpose.
 - In `observe` mode it records the proactive work it would have done and
   does not do it.
 - It never merges its own pull requests.
