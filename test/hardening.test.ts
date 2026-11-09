@@ -118,7 +118,7 @@ test('the default 10 MB body limit answers 413', async () => {
     const response = await fetch(`${handle.url}/items`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ padding: 'x'.repeat(11 * 1024 * 1024) }),
+      body: JSON.stringify({ padding: 'x'.repeat(10 * 1024 * 1024 + 1) }),
     });
     assert.equal(response.status, 413);
     const body = await response.json() as { error: string };
