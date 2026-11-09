@@ -1,0 +1,36 @@
+{
+  "$comment": [
+    "The settings dsh-superagent should run with for this repository.",
+    "apply-settings.mjs merges these into the blocks the installed version",
+    "holds, so a key this file does not know about keeps its current value.",
+    "Every value here can be changed on the panel afterwards."
+  ],
+  "source": {
+    "kind": "github",
+    "enabled": true,
+    "config": {
+      "repository": "YQteam-hq/apicovenant",
+      "agentCli": "/home/<you>/.local/bin/gh-agent"
+    }
+  },
+  "policy": {
+    "sources": {
+      "github": {
+        "allowed": [{ "id": "YQteam-dyq" }]
+      }
+    }
+  },
+  "executor": {
+    "directory": "/home/<you>/src/apicovenant",
+    "prepare": "git -C /home/<you>/src/apicovenant fetch --no-tags \"https://github.com/$DSH_SUPERAGENT_GITHUB_REPOSITORY.git\" \"${DSH_SUPERAGENT_GITHUB_PR_HEAD:-HEAD}:refs/dsh-superagent/$DSH_SUPERAGENT_TICKET\" && git -C /home/<you>/src/apicovenant worktree add -b \"agent/$DSH_SUPERAGENT_NAME\" \"$DSH_SUPERAGENT_DIR\" \"refs/dsh-superagent/$DSH_SUPERAGENT_TICKET\"",
+    "blockedCommands": []
+  },
+  "prompts": {
+    "team": {
+      "delivery": {
+        "commitAuthor": "YQteam-Iris",
+        "autoMerge": "never"
+      }
+    }
+  }
+}
