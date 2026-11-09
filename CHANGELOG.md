@@ -11,6 +11,22 @@ says so.
 
 ## [Unreleased]
 
+### Security
+
+- **Reports validate the severity before they use it.** A finding whose
+  `severity` is not `error`, `warn` or `info` was written verbatim into the
+  HTML report's `class` and `data-severity` attributes, so a crafted value
+  could inject markup or an event handler into the generated report. The same
+  value made the text report throw and the JSON report count `NaN`. Every
+  report now normalises the severity first: unknown values are reported as
+  `error`, valid findings render exactly as before.
+- **External `$ref` files are confined to the document's directory.** A
+  `$ref` containing `..` or an absolute path could read any file the process
+  can access and copy its contents into the bundled document. Resolved paths
+  must now stay inside the directory that contains the root document; sibling
+  files and subdirectories keep resolving as before, while escaping paths are
+  rejected with an actionable error.
+
 ## [1.0.5] — 2026-11-07
 
 Twenty one defects from the 1.0.4 review report, fixed across the YAML
@@ -100,7 +116,6 @@ Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
 - The `query` field of a golden file may now hold a list of strings when a
   key repeats. A file that holds the plain string form still loads, and the
   interaction key of a single valued query is unchanged.
-
 ## [1.0.4] — 2026-10-31
 
 Ten fixes to the recorder, the mock server, the diff engine and the YAML

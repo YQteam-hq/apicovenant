@@ -107,6 +107,66 @@ test('external references may chain across files', async () => {
   );
 });
 
+test('a $ref that escapes the base directory is rejected', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apicovenant-escape-'));
+  const secret = path.join(path.dirname(dir), `apicovenant-secret-${process.pid}-${Date.now()}.yaml`);
+  try {
+    await fs.writeFile(secret, 'Secret:\n  type: string\n');
+    await fs.writeFile(
+      path.join(dir, 'openapi.yaml'),
+      `openapi: 3.0.3
+info: { title: Escape, version: 1.0.0 }
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '../${path.basename(secret)}#/Secret'
+`,
+    );
+
+    await assert.rejects(loadSpecFile(path.join(dir, 'openapi.yaml')), /outside the base directory/);
+  } finally {
+    await fs.rm(secret, { force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a $ref that is an absolute path outside the base directory is rejected', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apicovenant-absolute-'));
+  const secret = path.join(os.tmpdir(), `apicovenant-absolute-secret-${process.pid}-${Date.now()}.yaml`);
+  try {
+    await fs.writeFile(secret, 'Secret:\n  type: string\n');
+    await fs.writeFile(
+      path.join(dir, 'openapi.yaml'),
+      `openapi: 3.0.3
+info: { title: Absolute, version: 1.0.0 }
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: ${JSON.stringify(`${secret}#/Secret`)}
+`,
+    );
+
+    await assert.rejects(loadSpecFile(path.join(dir, 'openapi.yaml')), /outside the base directory/);
+  } finally {
+    await fs.rm(secret, { force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a missing referenced file is reported, not silently ignored', async () => {
   await withSpecFiles({ 'openapi.yaml': MAIN }, async (entry) => {
     await assert.rejects(loadSpecFile(entry), /does not exist/);

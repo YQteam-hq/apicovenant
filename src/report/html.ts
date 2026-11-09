@@ -1,4 +1,5 @@
 import type { Finding, Severity } from '../lint/types.ts';
+import { safeSeverity } from './severity.ts';
 
 export interface HtmlReportOptions {
   tool: string;
@@ -21,16 +22,17 @@ export function escapeHtml(text: string): string {
 export function renderHtmlReport(options: HtmlReportOptions): string {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const counts: Record<Severity, number> = { error: 0, warn: 0, info: 0 };
-  for (const finding of options.findings) counts[finding.severity] += 1;
+  for (const finding of options.findings) counts[safeSeverity(finding.severity)] += 1;
 
   const rows = options.findings
     .map((finding) => {
+      const severity = safeSeverity(finding.severity);
       const location = finding.operation ? escapeHtml(finding.operation) : '<span class="muted">document</span>';
       const hint = finding.hint
         ? `<div class="hint"><span class="arrow">&rarr;</span> ${escapeHtml(finding.hint)}</div>`
         : '';
-      return `      <tr class="severity-${finding.severity}" data-severity="${finding.severity}">
-        <td><span class="pill pill-${finding.severity}">${escapeHtml(finding.severity)}</span></td>
+      return `      <tr class="severity-${severity}" data-severity="${severity}">
+        <td><span class="pill pill-${severity}">${severity}</span></td>
         <td class="rule">${escapeHtml(finding.ruleId)}</td>
         <td class="location">${location}<div class="path">${escapeHtml(finding.path)}</div></td>
         <td class="message">${escapeHtml(finding.message)}${hint}</td>
