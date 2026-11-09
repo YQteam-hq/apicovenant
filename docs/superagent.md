@@ -43,7 +43,7 @@ with the recommended defaults wherever a default existed.
 | Sources | GitHub only | The team works on GitHub; a Feishu source would add a bot app and a second CLI for no gain today. |
 | Repository | `YQteam-hq/apicovenant` | This repository. |
 | Agent account | `YQteam-Iris` | A dedicated account, so everything the agent writes is visibly its own. It must be a **user** account: the agent reads the account's notifications, so a GitHub App cannot be the agent. |
-| Who may ask for work | `YQteam-dyq` only | Start narrow. The upstream guidance is to widen the list only once what the agent would have done looks right. |
+| Who may ask for work | `YQteam-dyq`, `YQteam-Theodore` | Start narrow. The upstream guidance is to widen the list only once what the agent would have done looks right. |
 | Accept mode | `observe` | Proactive work is recorded but not carried out, so the first weeks cannot produce unwanted pull requests. |
 | Auto-merge | off | People merge. The agent never enables auto-merge as its own account. |
 | Branch prefix | `agent/` | The branch each Ticket's work lands on. |

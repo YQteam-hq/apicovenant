@@ -16,7 +16,7 @@
   "policy": {
     "sources": {
       "github": {
-        "allowed": [{ "id": "YQteam-dyq" }]
+        "allowed": [{ "id": "YQteam-dyq" }, { "id": "YQteam-Theodore" }]
       }
     }
   },
