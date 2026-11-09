@@ -1,0 +1,17 @@
+# Machine configuration for the dsh-superagent profile.
+#
+# Copy this file to ~/.dsh/profiles/superagent/cordis.patch.yml and replace
+# the placeholders. `dsh superagent --from-default-profile` overwrites the
+# profile and deletes this file, so run it only for a fresh installation.
+#
+# stateDir must be an absolute path. It holds the database, the lock, the
+# command shims in worker-bin, the agent's git configuration and, by
+# default, the Ticket directories. Back it up before upgrades.
+
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3082
+- id: dsh-superagent
+  config:
+    stateDir: /home/<you>/.dsh/state/superagent
