@@ -73,6 +73,28 @@ test('the HTML report escapes user supplied text', () => {
   assert.match(html, /&lt;script&gt;/);
 });
 
+test('an out-of-range severity cannot break out of the HTML attribute', () => {
+  const html = renderHtmlReport({
+    tool: 'apicovenant',
+    version: '0.1.0',
+    document: 'openapi.yaml',
+    findings: [
+      {
+        ruleId: 'x',
+        severity: '"><script>alert(1)</script>',
+        message: 'payload',
+        path: '/a',
+      } as unknown as Finding,
+    ],
+  });
+
+  assert.equal(html.includes('<script>alert'), false);
+  assert.equal(html.includes('data-severity=""'), false);
+  assert.match(html, /data-severity="error"/);
+  assert.match(html, /class="severity-error"/);
+  assert.match(html, /<span class="pill pill-error">error<\/span>/);
+});
+
 test('escapeHtml escapes the dangerous characters', () => {
   assert.equal(escapeHtml('<a href="x">&</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
 });
