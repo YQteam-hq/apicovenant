@@ -181,6 +181,14 @@ secret, and do not change a decision from the table above to make a check pass.
    Read the newest one. The troubleshooting table in `docs/006-deployment.md`
    of the bundle checkout maps each message to its fix.
 
+7. **The request was made after the agent started reading.** The agent reads
+   the notifications of its own account and keeps a cursor that starts at the
+   first polling round that reaches the GitHub API. A comment made before
+   that - before the CLI was signed in, or before the service ran - is never
+   seen, and no error appears. A **new** comment is always read by the next
+   round, so the fix is to post the request again. Do not edit the database
+   and do not restart the service for this.
+
 ## If a save is refused
 
 The response body names the setup problem. Fix it and continue:

@@ -285,6 +285,26 @@ links to the setting that would let it through.
 
 ---
 
+## A request that arrived before the agent was ready
+
+The agent reads the notifications of its own account and keeps a cursor of how
+far it has read. That cursor is created by the **first** polling round that
+reaches the GitHub API, and it starts at that moment - the agent never goes
+back and reads what happened before it started. A per-Issue cursor only moves
+forward as well.
+
+A request that was made while the agent's CLI was not signed in, or before
+the service ran, is therefore never seen: the notification is older than the
+cursor, and the comment is older than the per-Issue cursor. Nothing in the
+panel shows it, and no error appears - the agent simply never mentions it.
+
+The fix is a **new comment**. A comment made after the cursor exists is
+always read by the next round, because a round reads from the start of the
+round before it. Reposting the request is enough; there is no need to touch
+the database, and no restart is needed.
+
+---
+
 ## Stopping it
 
 ```sh
