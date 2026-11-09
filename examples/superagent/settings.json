@@ -10,13 +10,44 @@
     "enabled": true,
     "config": {
       "repository": "YQteam-hq/apicovenant",
-      "agentCli": "/home/<you>/.local/bin/gh-agent"
+      "agentCli": "/home/<you>/.local/bin/gh-agent",
+      "observeIssues": true,
+      "observePulls": true,
+      "observeComments": true,
+      "observeCi": true
     }
   },
+  "eval": {
+    "mode": "auto",
+    "timeoutSeconds": 300
+  },
   "policy": {
+    "rules": [
+      {
+        "id": "fix",
+        "name": "Defect fixes",
+        "enabled": true,
+        "instruction": "A defect in this repository: reproducible wrong behaviour with evidence - a failing test, a wrong output, or a security hole a proof of concept demonstrates. Make the failing case pass and add the test that proves it. Plan first: state the cause, the files it touches and the test that will prove it. Then implement the smallest change that fixes the cause rather than the symptom. Keep the runtime dependency count at zero and the source free of comments. Run `node --test`, `npx tsc --noEmit` and `node scripts/release-check.mjs` and keep going until all three pass. Open a pull request; never merge it and never publish."
+      },
+      {
+        "id": "feature",
+        "name": "Feature work",
+        "enabled": true,
+        "instruction": "A capability a maintainer asked for, or one a settled request describes. Plan first: state the scope, the files it touches, the public surface it adds or changes, and the tests that will prove it. Then implement it. A change to the public API, to the CLI flags or to the file formats needs a maintainer's decision, so stop with a draft and the options instead of choosing. Keep the runtime dependency count at zero and the source free of comments. Run `node --test`, `npx tsc --noEmit` and `node scripts/release-check.mjs` and keep going until all three pass. Open a pull request; never merge it and never publish."
+      },
+      {
+        "id": "maintain",
+        "name": "Repository upkeep",
+        "enabled": true,
+        "instruction": "Keeping the repository consistent with its own rules: the rule catalogue in `docs/rules.md` and the counts in both READMEs match the code, the CHANGELOG carries an entry, the documentation matches the behaviour, and a failing check is explained rather than ignored. Every change needs a test or a documentation update. Run `node --test`, `npx tsc --noEmit` and `node scripts/release-check.mjs` and keep going until all three pass. Open a pull request; never merge it and never publish."
+      }
+    ],
     "sources": {
       "github": {
-        "allowed": [{ "id": "YQteam-dyq" }, { "id": "YQteam-Theodore" }]
+        "allowed": [{ "id": "YQteam-dyq" }, { "id": "YQteam-Theodore" }],
+        "admission": {
+          "ci": { "unlistedUnaddressed": "inferred" }
+        }
       }
     }
   },
@@ -26,11 +57,11 @@
     "blockedCommands": []
   },
   "prompts": {
-    "team": {
-      "delivery": {
-        "commitAuthor": "YQteam-Iris",
-        "autoMerge": "never"
-      }
+    "communication": "Every message the agent posts to GitHub starts with the line `This is by an automated agent, not a human.` Answer in the thread that asked, never in a new one. Keep a message short and factual: what was done, what was verified, what is left. Say plainly when something was not done. `YQteam-dyq` and `YQteam-Theodore` are the humans who ask for work and they read every comment; `YQteam-Iris` is the agent account that writes. A review from a human is a request to act on it: do the work and reply with what changed.",
+    "scope": "A Ticket goes on when the work has a settled direction, a scope that fits the rule it matched, and a way to verify it. It stops with a draft when the direction is not settled - when the request leaves a choice open that a maintainer has to make, such as a version number, a change to the public API or the CLI flags, a file format, or a behaviour nobody asked for. In that case write the draft, name the options, and wait for a human. Never resolve an open design question on your own, and never start work that is larger than the request.",
+    "delivery": "The commit author is `YQteam-Iris`. The auto-merge condition is never: do not merge any pull request, do not enable auto-merge, do not create a tag, do not create a GitHub Release and do not publish to npm. A pull request carries the evidence: the output of `node --test`, `npx tsc --noEmit` and `node scripts/release-check.mjs`, all three passing, plus what changed and why. A report that claims a change without the command output is not done - run the commands, read their output, and paste it.",
+    "skills": {
+      "house": "The house rules of `YQteam-hq/apicovenant`, for the Sessions that decide as well as the ones that execute. The repository runs on Node's native type stripping with zero runtime dependencies and no build step, so a new dependency is never the answer. A checkout runs `node --test` for the suite, `npx tsc --noEmit` for the types and `node scripts/release-check.mjs` for the release gates; all three must pass. The published package is `apicovenant` under Apache-2.0 with a NOTICE file, authored by YQteam (yq-tuandui.xyz). The version number in `package.json` and the tag that publishes to npm belong to a human: do not change a version, do not tag, do not publish. The CLI is `init`, `lint`, `mock`, `record`, `diff`, `rules` and `mcp`."
     }
   }
 }

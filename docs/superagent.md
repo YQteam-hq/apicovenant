@@ -43,9 +43,11 @@ with the recommended defaults wherever a default existed.
 | Sources | GitHub only | The team works on GitHub; a Feishu source would add a bot app and a second CLI for no gain today. |
 | Repository | `YQteam-hq/apicovenant` | This repository. |
 | Agent account | `YQteam-Iris` | A dedicated account, so everything the agent writes is visibly its own. It must be a **user** account: the agent reads the account's notifications, so a GitHub App cannot be the agent. |
-| Who may ask for work | `YQteam-dyq`, `YQteam-Theodore` | Start narrow. The upstream guidance is to widen the list only once what the agent would have done looks right. |
-| Accept mode | `observe` | Proactive work is recorded but not carried out, so the first weeks cannot produce unwanted pull requests. |
-| Auto-merge | off | People merge. The agent never enables auto-merge as its own account. |
+| Who may ask for work | `YQteam-dyq`, `YQteam-Theodore` | The people who answer for the project. An account outside this list cannot start work, not even by mentioning the agent. |
+| Accept mode | `auto` | The agent decides on its own. A request from a listed account is always accepted; a candidate the agent finds on its own is accepted when it matches an enabled rule. |
+| Rules | `fix`, `feature`, `maintain` | The three kinds of work the agent may start by itself. The instruction of the rule that matched is the brief its Executor works from. |
+| Observed scopes | issues, pull requests, comments, default-branch CI | Without them the agent only ever hears what addresses it. With them it sees the repository's activity and can start by itself. |
+| Auto-merge | off | People merge. The agent never enables auto-merge as its own account, never merges a pull request, never tags and never publishes. |
 | Branch prefix | `agent/` | The branch each Ticket's work lands on. |
 | Profile | `superagent` | A copy of the Web profile, so a restart does not close the Sessions in the profile we work in. |
 | Port | `3082` | The panel. |
@@ -161,8 +163,9 @@ Management API of the panel, which runs on `127.0.0.1:<port>`:
 
 | Block | What it holds for this repository |
 | --- | --- |
-| `sources` | The GitHub source: repository `YQteam-hq/apicovenant`, agent CLI `~/.local/bin/gh-agent`. |
-| `policy` | The allowed senders: `YQteam-dyq` and `YQteam-Theodore`. Until a list has someone, no request can become a Ticket. |
+| `sources` | The GitHub source: repository `YQteam-hq/apicovenant`, agent CLI `~/.local/bin/gh-agent`, and the four observed scopes. |
+| `policy` | The rules the agent may start work by itself, and the allowed senders: `YQteam-dyq` and `YQteam-Theodore`. |
+| `eval` | The accept mode, `auto`. |
 | `executor` | The directory root (`~/src/apicovenant`) and the prepare command that gives each Ticket a worktree. |
 | prompts | The team sections: the GitHub disclosure line, the commit author and the auto-merge condition. |
 
@@ -225,6 +228,40 @@ a pull request.
 
 A mention added by editing an existing issue body does **not** arrive -
 post a new comment instead.
+
+## How it plans, writes and iterates on its own
+
+The agent does not wait to be told. With the accept mode on `auto` and the
+four observed scopes on, it reads the repository's own activity - a failing
+check, a comment that reports a defect, a pull request that needs work - and
+judges each candidate against the three rules:
+
+| Rule | What it may start by itself |
+| --- | --- |
+| `fix` | A defect with evidence: a failing test, a wrong output, a security hole a proof of concept demonstrates. |
+| `feature` | A capability a maintainer asked for, or one a settled request describes. |
+| `maintain` | The repository drifting from its own rules: the catalogue and the README counts, the CHANGELOG, the documentation, an unexplained failing check. |
+
+The loop for every Ticket is the same, and it is written into the rules the
+agent reads:
+
+1. **Plan.** State the cause or the goal, the files it touches and the test
+   that will prove it.
+2. **Implement.** The smallest change that fixes the cause, in the smallest
+   form that fits the repository.
+3. **Iterate.** Run `node --test`, `npx tsc --noEmit` and
+   `node scripts/release-check.mjs`, and keep going until all three pass.
+4. **Deliver.** Open a pull request with the output of the three gates, and
+   say plainly what is left.
+
+Two boundaries keep it honest, and both are in the prompt the agent reads:
+a report that claims a change without the command output is not done, and a
+decision that belongs to a human - a version number, a change to the public
+API, a new behaviour nobody asked for - stops with a draft and waits.
+
+What it never does on its own: merge a pull request, enable auto-merge,
+create a tag, create a GitHub Release, publish to npm, or change a version
+number.
 
 ---
 
@@ -326,10 +363,13 @@ requests it opened.
 - It writes **under `YQteam-Iris`**. Every comment and pull request carries
   that name, not the operator's.
 - It acts **only for `YQteam-dyq` and `YQteam-Theodore`**, until the allowed
-  list is widened on purpose.
-- In `observe` mode it records the proactive work it would have done and
-  does not do it.
-- It never merges its own pull requests.
+  list is widened on purpose. An account outside the list cannot start work,
+  not even by mentioning the agent.
+- On its own it starts only work that matches an enabled rule, and only in
+  the scopes the source observes.
+- It never merges a pull request, never enables auto-merge, never creates a
+  tag or a GitHub Release, never publishes to npm and never changes a
+  version number.
 - It runs with the operator's credentials removed: the environment setup
   drops `GH_TOKEN` and `GITHUB_TOKEN`, and the worker's git configuration
   uses only the agent's credentials for github.com.

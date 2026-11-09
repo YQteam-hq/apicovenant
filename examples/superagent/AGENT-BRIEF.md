@@ -22,8 +22,10 @@ original conversation with a pull request.
 | Repository | `YQteam-hq/apicovenant` |
 | Agent account (the one that writes and opens PRs) | `YQteam-Iris` |
 | Who may ask for work | `YQteam-dyq` and `YQteam-Theodore` |
-| Proactive work | `observe` only: record what it would have done, do not do it |
-| Auto-merge | never. The agent must not merge its own pull requests. |
+| Accept mode | `auto`: the agent starts work it judges worth doing, on its own |
+| Rules it may start by itself | `fix`, `feature`, `maintain` - the three kinds of work in `settings.json` |
+| Observed scopes | issues, pull requests, comments and the default branch's CI |
+| Auto-merge | never. The agent must not merge a pull request, tag, or publish. |
 | Branch prefix for the agent's work | `agent/` |
 | DSH profile | `superagent` |
 | Panel port | `3082` |
@@ -103,7 +105,9 @@ and never pasted into a chat.
 
    `apply-settings.mjs` reads the current settings from the panel's
    management API and merges into them, so a key the installed version
-   defines and `settings.json` does not mention keeps its value. It prints
+   defines and `settings.json` does not mention keeps its value. It writes
+   the source, the policy, the eval block and the executor block, and it
+   writes the team sections through the prompt configuration. It prints
    what it changed and which block needs a restart. A save that comes back
    `restarting: true` restarts the agent: wait until `status` stops exiting
    1 before the next request.
@@ -188,6 +192,27 @@ secret, and do not change a decision from the table above to make a check pass.
    seen, and no error appears. A **new** comment is always read by the next
    round, so the fix is to post the request again. Do not edit the database
    and do not restart the service for this.
+
+## How it works once it is set
+
+The agent does not wait to be told. With the accept mode on `auto` and the
+four observed scopes on, it reads the repository's own activity and starts
+what matches one of its three rules - `fix` a defect with evidence,
+`feature` work a maintainer asked for, `maintain` the repository's own
+consistency.
+
+Every Ticket runs the same loop, and the loop is written into the rules the
+agent reads: plan first (the cause, the files, the test that proves it),
+then implement the smallest change that fixes the cause, then run
+`node --test`, `npx tsc --noEmit` and `node scripts/release-check.mjs` and
+keep going until all three pass, then open a pull request with that output
+in it.
+
+The team sections in `settings.json` hold the boundaries: a report that
+claims a change without the command output is not done, and a decision that
+belongs to a human stops with a draft and waits. The agent never merges a
+pull request, never enables auto-merge, never tags, never creates a Release
+and never publishes to npm.
 
 ## If a save is refused
 
