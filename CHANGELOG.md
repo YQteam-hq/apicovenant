@@ -11,6 +11,12 @@ says so.
 
 ## [Unreleased]
 
+## [1.0.6] — 2026-11-09
+
+Two security fixes in the report writers and in the external `$ref` bundler.
+The rule catalogue is unchanged at 43 rules in 8 categories, no documented
+interface changed, and no runtime dependency was added.
+
 ### Security
 
 - **Reports validate the severity before they use it.** A finding whose
@@ -26,6 +32,9 @@ says so.
   must now stay inside the directory that contains the root document; sibling
   files and subdirectories keep resolving as before, while escaping paths are
   rejected with an actionable error.
+
+Both fixes are pinned by `test/report.test.ts` and
+`test/external-refs.test.ts`.
 
 ## [1.0.5] — 2026-11-07
 
@@ -451,7 +460,8 @@ Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
 - `typescript` is declared as `^5.8.0`: the `erasableSyntaxOnly` compiler
   option used by the project does not exist in 5.6.
 
-[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.6
 [1.0.5]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.5
 [1.0.4]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.4
 [1.0.3]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.3
