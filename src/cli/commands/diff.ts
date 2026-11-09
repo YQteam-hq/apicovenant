@@ -23,6 +23,9 @@ export interface DiffCommandOptions {
   replayAll: boolean;
   headers?: Record<string, string>;
   query?: Record<string, string | string[]>;
+  compareHeaders?: string[];
+  ignoreHeaders?: string[];
+  ignorePaths?: string[];
   failOn?: 'changed' | 'never';
   config?: string;
   output?: string;
@@ -33,10 +36,11 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
 
   const loaded = await loadConfig({ explicitPath: options.config });
   const fileConfig = loaded.config;
+  const section = fileConfig.diff;
 
-  const format: ReportFormat = options.format ?? fileConfig.format ?? 'text';
+  const format: ReportFormat = options.format ?? section?.format ?? fileConfig.format ?? 'text';
   // "--output -" is the conventional way to ask for stdout.
-  const requestedOutput = options.output ?? fileConfig.output;
+  const requestedOutput = options.output ?? section?.output ?? fileConfig.output;
   const output = requestedOutput === '-' ? undefined : requestedOutput;
 
   if (!options.target && !options.spec) {
@@ -61,50 +65,53 @@ export async function runDiff(options: DiffCommandOptions): Promise<number> {
   }
 
   try {
-    const report: DiffReport = await compareGolden(golden, source, {
-      replayAll: options.replayAll,
-      spec,
+  const report: DiffReport = await compareGolden(golden, source, {
+    replayAll: options.replayAll,
+    spec,
+    compareHeaders: options.compareHeaders ?? section?.compareHeaders,
+    ignoreHeaders: [...(section?.ignoreHeaders ?? []), ...(options.ignoreHeaders ?? [])],
+    ignorePaths: [...(section?.ignorePaths ?? []), ...(options.ignorePaths ?? [])],
+  });
+
+  let rendered: string;
+  if (format === 'json') {
+    rendered = `${JSON.stringify(
+      {
+        tool: TOOL_NAME,
+        version: VERSION,
+        generatedAt: new Date().toISOString(),
+        ...report,
+        // report.golden has always held the recorded target URL, which made
+        // "golden" ambiguous in machine-readable output.
+        golden: options.golden,
+        target: report.golden,
+      },
+      null,
+      2,
+    )}\n`;
+  } else if (format === 'html') {
+    rendered = renderDiffHtmlReport({
+      report,
+      goldenFile: options.golden,
+      title: 'Contract drift report',
     });
+  } else {
+    rendered = `${renderDiffReport({ report, goldenFile: options.golden })}\n`;
+  }
 
-    let rendered: string;
-    if (format === 'json') {
-      rendered = `${JSON.stringify(
-        {
-          tool: TOOL_NAME,
-          version: VERSION,
-          generatedAt: new Date().toISOString(),
-          ...report,
-          // report.golden has always held the recorded target URL, which made
-          // "golden" ambiguous in machine-readable output.
-          golden: options.golden,
-          target: report.golden,
-        },
-        null,
-        2,
-      )}\n`;
-    } else if (format === 'html') {
-      rendered = renderDiffHtmlReport({
-        report,
-        goldenFile: options.golden,
-        title: 'Contract drift report',
-      });
-    } else {
-      rendered = `${renderDiffReport({ report, goldenFile: options.golden })}\n`;
-    }
+  if (output) {
+    // Keep the file free of the ANSI escapes the terminal renderer emits.
+    await writeTextFile(output, format === 'text' ? stripAnsi(rendered) : rendered);
+    process.stdout.write(
+      `${TOOL_NAME}: report written to ${output} (${report.summary.changed} changed, ${report.summary.unchanged} unchanged)\n`,
+    );
+  } else {
+    process.stdout.write(rendered);
+  }
 
-    if (output) {
-      // Keep the file free of the ANSI escapes the terminal renderer emits.
-      await writeTextFile(output, format === 'text' ? stripAnsi(rendered) : rendered);
-      process.stdout.write(
-        `${TOOL_NAME}: report written to ${output} (${report.summary.changed} changed, ${report.summary.unchanged} unchanged)\n`,
-      );
-    } else {
-      process.stdout.write(rendered);
-    }
-
-    if (options.failOn === 'never') return 0;
-    if (report.summary.changed > 0 || report.summary.failed > 0) return 1;
-    return 0;
+  if (options.failOn === 'never' || (options.failOn === undefined && section?.failOn === 'never')) return 0;
+  if (report.summary.changed > 0 || report.summary.failed > 0) return 1;
+  return 0;
   } finally {
     // The mock keeps a listening socket, so a failure while comparing or
     // rendering would otherwise leave the process (and CI) hanging.

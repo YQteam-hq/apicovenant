@@ -12,6 +12,8 @@ export interface RecordCommandOptions {
   port: number;
   maxRequests?: number;
   durationSeconds?: number;
+  redactHeaders?: string[];
+  redactQueries?: string[];
 }
 
 export async function runRecord(options: RecordCommandOptions): Promise<number> {
@@ -27,6 +29,8 @@ export async function runRecord(options: RecordCommandOptions): Promise<number> 
     port: options.port,
     maxRequests: options.maxRequests,
     durationMs: options.durationSeconds ? options.durationSeconds * 1000 : undefined,
+    redactHeaderNames: options.redactHeaders,
+    redactQueryNames: options.redactQueries,
     onComplete: () => finishRecording?.(),
   });
 
