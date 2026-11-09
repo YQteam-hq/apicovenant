@@ -33,6 +33,14 @@ function isRemote(reference: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(reference);
 }
 
+function isInsideDirectory(directory: string, candidate: string): boolean {
+  const relative = path.relative(directory, candidate);
+  return (
+    relative === '' ||
+    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  );
+}
+
 function parseFile(text: string, filePath: string): unknown {
   const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   if (path.extname(filePath).toLowerCase() === '.json') {
@@ -79,6 +87,12 @@ export async function bundleExternalRefs(root: unknown, documentPath: string): P
   // specifications.
   const hasExternalRef = [...collectRefs(root)].some((ref) => !ref.startsWith('#/'));
   if (!hasExternalRef) return root;
+
+  // A document may reference sibling files and subdirectories, but it must
+  // not use ".." or an absolute path to escape the directory that contains
+  // it. Without this boundary a malicious $ref could read any file the
+  // process can access and expose its contents through the bundled document.
+  const baseDirectory = path.dirname(path.resolve(documentPath));
 
   const files = new Map<string, unknown>();
   const bundled = new Map<string, string>();
@@ -149,6 +163,14 @@ export async function bundleExternalRefs(root: unknown, documentPath: string): P
       // Relative paths are relative to the file that contains the $ref,
       // not to the root document.
       const targetFile = file === '' ? filePath : path.resolve(path.dirname(filePath), file);
+      if (!isInsideDirectory(baseDirectory, targetFile)) {
+        throw new ExternalRefError(
+          `external $ref "${ref}" resolves outside the base directory ${baseDirectory}; ` +
+            'apicovenant only bundles files inside it',
+          ref,
+          documentPath,
+        );
+      }
       const localPointer = await bundleTarget(targetFile, pointer, ref);
       const rest = Object.fromEntries(Object.entries(node).filter(([key]) => key !== '$ref'));
       return Object.keys(rest).length > 0 ? { $ref: localPointer, ...rest } : { $ref: localPointer };

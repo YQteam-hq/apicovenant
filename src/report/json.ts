@@ -1,4 +1,5 @@
 import type { Finding, Severity } from '../lint/types.ts';
+import { safeSeverity } from './severity.ts';
 
 export interface JsonReport {
   tool: string;
@@ -31,7 +32,7 @@ export interface BuildJsonReportOptions {
 
 export function buildJsonReport(options: BuildJsonReportOptions): JsonReport {
   const counts: Record<Severity, number> = { error: 0, warn: 0, info: 0 };
-  for (const finding of options.findings) counts[finding.severity] += 1;
+  for (const finding of options.findings) counts[safeSeverity(finding.severity)] += 1;
 
   return {
     tool: options.tool,
@@ -46,7 +47,7 @@ export function buildJsonReport(options: BuildJsonReportOptions): JsonReport {
     },
     findings: options.findings.map((finding) => ({
       ruleId: finding.ruleId,
-      severity: finding.severity,
+      severity: safeSeverity(finding.severity),
       message: finding.message,
       path: finding.path,
       operation: finding.operation,
