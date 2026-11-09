@@ -11,7 +11,7 @@ says so.
 
 ## [Unreleased]
 
-## [1.1.0] 2026-11-07
+## [1.1.0] — 2026-11-07
 
 **Contract compatibility, coverage and a v2 configuration.** This release turns
 the linter into a contract lifecycle tool: two documents can be compared for
@@ -122,6 +122,31 @@ and can be migrated.
   required documentation and the shipped file list. Benchmark targets are met
   without a semantic cache; the rationale is documented in the README.
 
+## [1.0.6] — 2026-11-09
+
+Two security fixes in the report writers and in the external `$ref` bundler.
+The rule catalogue is unchanged at 43 rules in 8 categories, no documented
+interface changed, and no runtime dependency was added.
+
+### Security
+
+- **Reports validate the severity before they use it.** A finding whose
+  `severity` is not `error`, `warn` or `info` was written verbatim into the
+  HTML report's `class` and `data-severity` attributes, so a crafted value
+  could inject markup or an event handler into the generated report. The same
+  value made the text report throw and the JSON report count `NaN`. Every
+  report now normalises the severity first: unknown values are reported as
+  `error`, valid findings render exactly as before.
+- **External `$ref` files are confined to the document's directory.** A
+  `$ref` containing `..` or an absolute path could read any file the process
+  can access and copy its contents into the bundled document. Resolved paths
+  must now stay inside the directory that contains the root document; sibling
+  files and subdirectories keep resolving as before, while escaping paths are
+  rejected with an actionable error.
+
+Both fixes are pinned by `test/report.test.ts` and
+`test/external-refs.test.ts`.
+
 ## [1.0.5] — 2026-11-07
 
 Twenty one defects from the 1.0.4 review report, fixed across the YAML
@@ -211,7 +236,6 @@ Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
 - The `query` field of a golden file may now hold a list of strings when a
   key repeats. A file that holds the plain string form still loads, and the
   interaction key of a single valued query is unchanged.
-
 ## [1.0.4] — 2026-10-31
 
 Ten fixes to the recorder, the mock server, the diff engine and the YAML
@@ -547,7 +571,8 @@ Released by **YQteam** (<https://yq-tuandui.xyz>), Apache-2.0.
 - `typescript` is declared as `^5.8.0`: the `erasableSyntaxOnly` compiler
   option used by the project does not exist in 5.6.
 
-[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/YQteam-hq/apicovenant/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.6
 [1.0.5]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.5
 [1.0.4]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.4
 [1.0.3]: https://github.com/YQteam-hq/apicovenant/releases/tag/v1.0.3

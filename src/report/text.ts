@@ -2,6 +2,7 @@ import { bold, cyan, dim, green, magenta, red, yellow } from '../util/ansi.ts';
 import { humanizePointer } from '../util/json-pointer.ts';
 import { truncate } from '../util/text.ts';
 import type { Finding, Severity } from '../lint/types.ts';
+import { safeSeverity } from './severity.ts';
 
 const SEVERITY_LABEL: Record<Severity, string> = {
   error: 'error',
@@ -49,7 +50,7 @@ export function renderTextReport(options: TextReportOptions): string {
   }
 
   const counts = { error: 0, warn: 0, info: 0 } as Record<Severity, number>;
-  for (const finding of findings) counts[finding.severity] += 1;
+  for (const finding of findings) counts[safeSeverity(finding.severity)] += 1;
 
   const summaryParts: string[] = [];
   if (counts.error > 0) summaryParts.push(red(`${counts.error} ${counts.error === 1 ? 'error' : 'errors'}`));
@@ -78,7 +79,8 @@ export function renderTextReport(options: TextReportOptions): string {
       lines.push('');
     }
 
-    const label = SEVERITY_COLOR[finding.severity](SEVERITY_LABEL[finding.severity].padEnd(7));
+    const severity = safeSeverity(finding.severity);
+    const label = SEVERITY_COLOR[severity](SEVERITY_LABEL[severity].padEnd(7));
     lines.push(`  ${label} ${magenta(finding.ruleId)}`);
     lines.push(`          ${finding.message}`);
     if (finding.path) {
