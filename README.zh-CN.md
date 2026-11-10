@@ -424,6 +424,83 @@ console.log(mock.url);
 入口导出了规则引擎、规范加载器与模型、JSON Schema 校验器、mock 服务、录制器、
 差分引擎，以及三种报告渲染器。
 
+## 1.1.0 新特性：契约生命周期工具包
+
+1.1.0 版本将 `apicovenant` 打造成了完整的契约生命周期工具。除了 linting 和 mock，现在还支持：
+
+### 破坏性变更分析
+
+```bash
+# 比较两个 OpenAPI 规范的破坏性变更
+apicovenant breaking old-spec.yaml new-spec.yaml
+
+# 将每个变更分类为 breaking、risky、compatible 或 info
+# 使用稳定的 41 类分类法和 SARIF 输出
+```
+
+### 契约测试
+
+```bash
+# 从 OpenAPI 规范生成契约测试
+apicovenant test examples/shop.openapi.yaml --target http://localhost:3000
+
+# 验证响应是否符合文档中的状态码、媒体类型和 schema
+# 内置 mock 目标、JUnit 输出用于 CI，以及 JSON/SARIF 格式
+```
+
+### 流量覆盖率分析
+
+```bash
+# 测量记录的流量对规范的覆盖率
+apicovenant coverage traffic.golden.yaml --spec examples/shop.openapi.yaml
+
+# 找出未执行的 operation、未记录的流量和状态码缺口
+# 支持可配置的最小阈值和失败条件
+```
+
+### 增强的 Mock 服务器
+
+```bash
+# 严格模式根据规范验证请求
+apicovenant mock spec.yaml --strict --strict-unknown
+
+# 支持 CORS、监听模式和可配置的 body 限制
+# 所有配置都通过 v2 mock 配置完成
+```
+
+### v2 配置
+
+```json
+{
+  "version": 2,
+  "lint": { "extends": ["apicovenant:strict"] },
+  "mock": { "strict": true, "cors": true },
+  "breaking": { "fail-on": "breaking" }
+}
+```
+
+### MCP 协议集成
+
+通过 Model Context Protocol 向 AI agent 提供 `apicovenant` 工具：
+
+```bash
+apicovenant mcp
+```
+
+使 AI agent 能够 lint 文档、列出 operation、生成示例和检查契约漂移。
+
+### 迁移工具
+
+```bash
+# 将 v1 配置迁移到 v2 格式
+apicovenant migrate --config apicovenant.config.v1.json
+
+# 将 golden 文件从格式 1 迁移到格式 2
+apicovenant migrate --golden traffic.golden.v1.json
+```
+
+所有现有的命令、参数、库导出和 v1 配置文件都继续工作。Golden 文件现在以格式 2 写入；格式 1 文件可以读取并迁移。
+
 ## 项目结构
 
 ```

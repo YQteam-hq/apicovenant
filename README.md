@@ -499,6 +499,83 @@ The entry point exports the rule engine, the spec loader and model, the JSON
 Schema validator, the mock server, the recorder, the diff engine and the three
 reporters.
 
+## New in 1.1.0: Contract Lifecycle Toolkit
+
+The 1.1.0 release turns `apicovenant` into a complete contract lifecycle tool. Beyond linting and mocking, you can now:
+
+### Breaking Change Analysis
+
+```bash
+# Compare two OpenAPI specs for breaking changes
+apicovenant breaking old-spec.yaml new-spec.yaml
+
+# Classify every change as breaking, risky, compatible, or info
+# with a stable 41-class taxonomy and SARIF output
+```
+
+### Contract Testing
+
+```bash
+# Generate contract tests from your OpenAPI spec
+apicovenant test examples/shop.openapi.yaml --target http://localhost:3000
+
+# Validates responses against documented status, media type, and schema
+# Built-in mock target, JUnit output for CI, and JSON/SARIF formats
+```
+
+### Traffic Coverage Analysis
+
+```bash
+# Measure how much of your spec is exercised by recorded traffic
+apicovenant coverage traffic.golden.yaml --spec examples/shop.openapi.yaml
+
+# Finds unexercised operations, undocumented traffic, and status gaps
+# with configurable minimum thresholds and failure gates
+```
+
+### Enhanced Mock Server
+
+```bash
+# Strict mode validates requests against the spec
+apicovenant mock spec.yaml --strict --strict-unknown
+
+# CORS support, watch mode, and configurable body limits
+# All configurable through the v2 mock configuration
+```
+
+### Configuration v2
+
+```json
+{
+  "version": 2,
+  "lint": { "extends": ["apicovenant:strict"] },
+  "mock": { "strict": true, "cors": true },
+  "breaking": { "fail-on": "breaking" }
+}
+```
+
+### MCP Protocol Integration
+
+Serve `apicovenant` tools to AI agents over the Model Context Protocol:
+
+```bash
+apicovenant mcp
+```
+
+Enables AI agents to lint documents, list operations, generate examples, and check for contract drift.
+
+### Migration Tools
+
+```bash
+# Migrate v1 configuration to v2 format
+apicovenant migrate --config apicovenant.config.v1.json
+
+# Migrate golden files from format 1 to format 2
+apicovenant migrate --golden traffic.golden.v1.json
+```
+
+All existing commands, flags, library exports, and v1 configuration files keep working. Golden files are now written in format 2; format 1 files are read and can be migrated.
+
 ## How it is put together
 
 ```

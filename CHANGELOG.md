@@ -11,6 +11,15 @@ says so.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Release check script fallback**: Fixed the release-check script to handle CLI version retrieval failures gracefully by falling back to package.json version when the CLI cannot be executed.
+
+### Updated
+
+- **README documentation**: Added comprehensive 1.1.0 feature documentation including breaking analysis, contract testing, traffic coverage, enhanced mock server, v2 configuration, MCP integration, and migration tools for both English and Chinese versions.
+- **Breaking analysis documentation**: Added practical examples, CI integration patterns, and common scenarios with detailed explanations of severities and change classifications.
+
 ## [1.1.0] — 2026-11-10
 
 **Contract compatibility, coverage and a v2 configuration.** This release turns
