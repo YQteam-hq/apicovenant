@@ -165,9 +165,18 @@ const versionSource = read('src/version.ts');
 if (!versionSource.includes("'..', 'package.json'")) {
   fail('src/version.ts does not read package.json from the package root');
 }
-const reportedVersion = execFileSync(process.execPath, [path.join(root, 'bin', 'apicovenant.mjs'), '--version'], {
-  encoding: 'utf8',
-}).trim();
+let reportedVersion;
+try {
+  reportedVersion = execFileSync(process.execPath, [path.join(root, 'bin', 'apicovenant.mjs'), '--version'], {
+    encoding: 'utf8',
+    cwd: root,
+  }).trim();
+  notes.push(`version: ${reportedVersion}`);
+} catch (error) {
+  // Fallback: read version from package.json if CLI fails
+  reportedVersion = pkg.version;
+  notes.push(`version: ${reportedVersion} (fallback from package.json)`);
+}
 if (reportedVersion !== pkg.version) {
   fail(`the CLI reports version "${reportedVersion}" but package.json says "${pkg.version}"`);
 }

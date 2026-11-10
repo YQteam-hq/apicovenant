@@ -152,3 +152,132 @@ apicovenant breaking --base old.yaml --head new.yaml --format sarif --output bre
 - External `$ref` files are bundled before comparison, so split documents work.
 - Recursive schemas are compared up to a bounded depth to avoid cycles.
 - A change that cannot be classified confidently is reported as `risky`.
+
+## Examples
+
+### Basic breaking change detection
+
+```bash
+# Compare two versions of your API
+apicovenant breaking --base openapi.v1.yaml --head openapi.yaml
+
+# Output:
+# 1 breaking change · 0 risky · 2 compatible · 1 info
+# 
+# GET /users/{userId}
+#   error   response-property-removed
+#           Response property "email" was removed
+#           paths./users~1{userId}/get.responses.200.content.application~1json.schema.properties.email
+#           → Clients read the field; keep it or version the endpoint.
+```
+
+### Ignore specific change types
+
+```bash
+# Ignore breaking changes to response properties (for API cleanup)
+apicovenant breaking --base old.yaml --head new.yaml --ignore-change response-property-removed
+```
+
+### JSON output for automation
+
+```bash
+# Generate JSON report for CI/CD pipelines
+apicovenant breaking --base v1.yaml --head v2.yaml --format json --output breaking-report.json
+
+# Output structure:
+{
+  "apicovenant": 1,
+  "base": "v1.yaml",
+  "head": "v2.yaml", 
+  "summary": { "breaking": 1, "risky": 2, "compatible": 5, "info": 1, "total": 9 },
+  "changes": [
+    {
+      "id": "parameter-required-added",
+      "severity": "breaking",
+      "operation": "POST /users",
+      "location": {
+        "base": "/paths/~1users/post/parameters/apiKey",
+        "head": "/paths/~1users/post/parameters/apiKey"
+      },
+      "message": "Required parameter \"apiKey\" was added",
+      "hint": "Existing clients don't send this parameter; they will get 400 errors."
+    }
+  ]
+}
+```
+
+### SARIF output for GitHub code scanning
+
+```bash
+# Generate SARIF report for GitHub security scanning
+apicovenant breaking --base main.yaml --head feature.yaml --format sarif --output breaking.sarif
+
+# Upload to GitHub:
+# gh code-scanning upload --sarif=breaking.sarif
+```
+
+### CI integration with different thresholds
+
+```yaml
+# .github/workflows/ci.yml
+- name: Check for breaking changes
+  run: |
+    npx apicovenant breaking --base main.openapi.yaml --head openapi.yaml --fail-on breaking
+    # Only fail on actual breaking changes (ignore risky)
+
+- name: Strict mode - fail on risky changes  
+  run: |
+    npx apicovenant breaking --base main.openapi.yaml --head openapi.yaml --fail-on risky
+    # Fail on breaking + risky changes
+
+- name: Paranoia mode - fail on any change
+  run: |
+    npx apicovenant breaking --base main.openapi.yaml --head openapi.yaml --fail-on any
+    # Fail on any change (even compatible ones)
+```
+
+### Configuration file usage
+
+```json
+// apicovenant.config.json
+{
+  "version": 2,
+  "breaking": {
+    "fail-on": "risky",
+    "ignore-change": ["response-property-added"]
+  }
+}
+```
+
+```bash
+# Use configuration file
+apicovenant breaking --base old.yaml --head new.yaml --config apicovenant.config.json
+```
+
+### Common scenarios and their severities
+
+#### Breaking changes (require API versioning)
+
+- Removing an operation (`operation-removed`)
+- Adding required parameters (`parameter-required-added`) 
+- Changing parameter types (`parameter-type-changed`)
+- Removing response properties (`response-property-removed`)
+- Adding security requirements (`security-requirement-added`)
+
+#### Risky changes (review before release)
+
+- Deprecating operations (`deprecated-added`)
+- Removing optional parameters (`parameter-optional-removed`)
+- Changing response structure in backwards-incompatible ways (`schema-composition-changed`)
+
+#### Compatible changes (safe to release)
+
+- Adding new operations (`operation-added`)
+- Adding optional parameters (`parameter-optional-added`)
+- Adding new response properties (`response-property-added`)
+- Widening enum values (`schema-enum-widened`)
+
+#### Info changes (documentation only)
+
+- Adding new defaults (`default-changed`)
+- Adding new servers (`server-added`)
